@@ -221,26 +221,42 @@ class Yume1p5Pipeline:
         operator_condition = self.operators.process_interaction()
         self.operators.delete_last_interaction()
 
-        if task_type == "i2v" and images is None and videos is None:
-            if getattr(self.memory_module, "n_generated_segments", 0) > 0:
-                task_type = "v2v"
+        effective_task_type = task_type
+        predict_image = None if ctx is None else ctx.get("ref_images")
+        predict_video = None if ctx is None else ctx.get("ref_videos")
+
+        # In streaming continuation, prefer i2v with the latest frame as anchor.
+        if task_type == "i2v" and images is None and videos is None and predict_image is None:
+            if predict_video is not None and getattr(self.memory_module, "n_generated_segments", 0) > 0:
+                effective_task_type = "v2v"
+            else:
+                raise ValueError("No valid image/video context for i2v stream continuation.")
+
+        if effective_task_type == "i2v":
+            predict_video = None
 
         output_video = self.synthesis_model.predict(
             prompt=prompt,
-            image=None if ctx is None else ctx.get("ref_images"),
-            video=None if ctx is None else ctx.get("ref_videos"),
+            image=predict_image,
+            video=predict_video,
             interactions=interactions,
             interaction_captions=operator_condition,
             interaction_speeds=interaction_speeds,
             interaction_distances=interaction_distances,
-            task_type=task_type,
+            task_type=effective_task_type,
             size=size,
             seed=seed,
             num_euler_timesteps=num_euler_timesteps,
         )
 
         output_video_frames = self._to_pil_frames(output_video)
-        output_visual_context = self.operators.process_perception(videos=output_video_frames, size=size)
+        if len(output_video_frames) == 0:
+            raise RuntimeError("Synthesis returned an empty video in stream().")
+        output_visual_context = self.operators.process_perception(
+            images=output_video_frames[-1],
+            videos=output_video_frames,
+            size=size
+        )
         self.memory_module.record(
             output_video_frames,
             visual_context=output_visual_context,

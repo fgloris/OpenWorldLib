@@ -29,7 +29,7 @@ class Yume1p5Memory(BaseMemory):
                 current_image = data[-1]
                 if record_frames:
                     self.all_frames.extend(data)
-            if not as_context:
+            if (not as_context) and len(data) > 0:
                 self.n_generated_segments += 1
         else:
             raise TypeError(f"Unsupported data type for record(): {type(data)}")
@@ -37,9 +37,11 @@ class Yume1p5Memory(BaseMemory):
         visual_context = kwargs.get("visual_context", None)
         if visual_context is not None:
             if "ref_images" in visual_context:
-                self.ref_images = visual_context["ref_images"]
+                if (visual_context["ref_images"] is not None) or as_context:
+                    self.ref_images = visual_context["ref_images"]
             if "ref_videos" in visual_context:
-                self.ref_videos = visual_context["ref_videos"]
+                if (visual_context["ref_videos"] is not None) or as_context:
+                    self.ref_videos = visual_context["ref_videos"]
 
         self.storage.append(
             {
