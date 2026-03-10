@@ -19,10 +19,10 @@ def save_audio_result(result):
 video_path = "./data/test_video_case1/talking_man.mp4"
 title = "play guitar"
 description = "A man is playing guitar gently"
-pretrained_model_path = "FunAudioLLM/ThinkSound"
+model_path = "FunAudioLLM/ThinkSound"
 
 pipeline = ThinkSoundPipeline.from_pretrained(
-    synthesis_model_path=pretrained_model_path,
+    model_path=model_path,
     model_config="src/openworldlib/synthesis/audio_generation/thinksound/ThinkSound/ThinkSound/configs/model_configs/thinksound.json",
     duration_sec=3.0,
     seed=42,

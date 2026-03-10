@@ -23,12 +23,12 @@ def save_audio_result(result, skip_video_composite=False):
         logger.info(f"Video saved to {video_save_path}")
 
 # 视频路径（可选，如果不提供则为 text-to-audio 模式）则设置为None
-video_path = "./data/test_case1/test_video.mp4"  
-test_prompt = "A man plays guitar."
-pretrained_model_path = "hkchengrex/MMAudio" # 可以提供本地路径或者hugid路径
+video_path = "./data/test_video_case1/talking_man.mp4"  
+test_prompt = "A man is talking about his life."
+model_path = "hkchengrex/MMAudio" # 可以提供本地路径或者hugid路径
 
 pipeline = MMAudioPipeline.from_pretrained(
-    pretrained_model_path=pretrained_model_path,
+    model_path=model_path,
     variant='large_44k_v2',  # 可选: 'small_16k', 'small_44k', 'medium_44k', 'large_44k', 'large_44k_v2'
     full_precision=False,
     num_steps=25,
