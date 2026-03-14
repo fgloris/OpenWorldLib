@@ -17,57 +17,64 @@ Extension repo：[[3D generation]](https://github.com/zengbohan0217/OpenWorldLib
 
 <!-- add demo -->
 <div align="center">
-<figure style="display:inline-block; text-align:center; margin:8px;">
-  <img src="https://github.com/user-attachments/assets/1c328d17-ef94-4d53-8dc2-f77ec3964a74" width="218" height="120">
-  <figcaption>Matrix-Game-2</figcaption>
-</figure>
-<figure style="display:inline-block; text-align:center; margin:8px;">
-  <img src="https://github.com/user-attachments/assets/2fac45f5-d365-4794-bf38-45aee58f3d45" width="218" height="120">
-  <figcaption>Hunyuan-GameCraft</figcaption>
-</figure>
-<figure style="display:inline-block; text-align:center; margin:8px;">
-  <img src="" width="218" height="120">
-  <figcaption>Hunyuan-Worldplay</figcaption>
-</figure>
-<br/>
-<figure style="display:inline-block; text-align:center; margin:8px;">
-  <img src="" width="218" height="120">
-  <figcaption>Lingbot-World</figcaption>
-</figure>
-<figure style="display:inline-block; text-align:center; margin:8px;">
-  <img src="" width="218" height="120">
-  <figcaption>YUME-1.5</figcaption>
-</figure>
-<figure style="display:inline-block; text-align:center; margin:8px;">
-  <img src="" width="218" height="120">
-  <figcaption>FlashWorld</figcaption>
-</figure>
-<br/>
-<figure style="display:inline-block; text-align:center; margin:8px;">
-  <img src="https://github.com/user-attachments/assets/c4fa5245-e837-4e47-a4e4-585a61358f91" width="218" height="120">
-  <figcaption>Wan-2.2</figcaption>
-</figure>
-<figure style="display:inline-block; text-align:center; margin:8px;">
-  <img src="https://github.com/user-attachments/assets/a47b2e0e-b62c-45fb-bb99-6377f53e3f5e" width="218" height="120">
-  <figcaption>WoW</figcaption>
-</figure>
-<figure style="display:inline-block; text-align:center; margin:8px;">
-  <img src="" width="218" height="120">
-  <figcaption>Cosmos-Predict-2.5</figcaption>
-</figure>
-<br/>
-<figure style="display:inline-block; text-align:center; margin:8px;">
-  <img src="" width="218" height="120">
-  <figcaption>VGGT/Pi3</figcaption>
-</figure>
-<figure style="display:inline-block; text-align:center; margin:8px;">
-  <img src="https://github.com/user-attachments/assets/dab9c489-fcb8-412d-99af-9fdad4e76e0e" width="120" height="120">
-  <figcaption>Libero</figcaption>
-</figure>
-<figure style="display:inline-block; text-align:center; margin:8px;">
-  <img src="https://github.com/user-attachments/assets/f8b4253b-9172-4afa-bd0e-ae0bc7ea8b25" width="120" height="120">
-  <figcaption>Ai2-THOR</figcaption>
-</figure> 
+<table>
+<tr>
+  <td align="center">
+    <img src="https://github.com/user-attachments/assets/1c328d17-ef94-4d53-8dc2-f77ec3964a74" width="218" height="120"><br/>
+    <b>Matrix-Game-2</b>
+  </td>
+  <td align="center">
+    <img src="https://github.com/user-attachments/assets/2fac45f5-d365-4794-bf38-45aee58f3d45" width="218" height="120"><br/>
+    <b>Hunyuan-GameCraft</b>
+  </td>
+  <td align="center">
+    <img src="" width="218" height="120"><br/>
+    <b>Hunyuan-Worldplay</b>
+  </td>
+</tr>
+<tr>
+  <td align="center">
+    <img src="" width="218" height="120"><br/>
+    <b>Lingbot-World</b>
+  </td>
+  <td align="center">
+    <img src="" width="218" height="120"><br/>
+    <b>YUME-1.5</b>
+  </td>
+  <td align="center">
+    <img src="" width="218" height="120"><br/>
+    <b>FlashWorld</b>
+  </td>
+</tr>
+<tr>
+  <td align="center">
+    <img src="https://github.com/user-attachments/assets/c4fa5245-e837-4e47-a4e4-585a61358f91" width="218" height="120"><br/>
+    <b>Wan-2.2</b>
+  </td>
+  <td align="center">
+    <img src="https://github.com/user-attachments/assets/a47b2e0e-b62c-45fb-bb99-6377f53e3f5e" width="218" height="120"><br/>
+    <b>WoW</b>
+  </td>
+  <td align="center">
+    <img src="" width="218" height="120"><br/>
+    <b>Cosmos-Predict-2.5</b>
+  </td>
+</tr>
+<tr>
+  <td align="center">
+    <img src="" width="218" height="120"><br/>
+    <b>VGGT/Pi3</b>
+  </td>
+  <td align="center">
+    <img src="https://github.com/user-attachments/assets/dab9c489-fcb8-412d-99af-9fdad4e76e0e" width="120" height="120"><br/>
+    <b>Libero</b>
+  </td>
+  <td align="center">
+    <img src="https://github.com/user-attachments/assets/f8b4253b-9172-4afa-bd0e-ae0bc7ea8b25" width="120" height="120"><br/>
+    <b>Ai2-THOR</b>
+  </td>
+</tr>
+</table>
 </div>
 
 We define a world model as: **A model or framework centered on perception, equipped with interaction and long-term memory capabilities, for understanding and predicting the complex world.** Accordingly, 🎓 *Multimodal Understanding*, 🤖 *Visual Action Prediction*, and 🖼️ *Visual Generation* are all sub-tasks that a world model needs to accomplish.
