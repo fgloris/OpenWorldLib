@@ -110,7 +110,7 @@ def main():
 
     rank = get_rank()
 
-    image_path = "./data/test_case1/ref_image.png"
+    image_path = "./data/test_case/test_image_case1/ref_image.png"
     input_image = Image.open(image_path).convert("RGB")
 
     pretrained_model_path = "tencent/Hunyuan-GameCraft-1.0"

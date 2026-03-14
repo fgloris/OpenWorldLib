@@ -5,6 +5,7 @@
 **/__pycache__
 **/__pycache__/
 **/.ipynb_checkpoints/
+**/test_assets/
 *.egg
 *.egg-info  
 *.txt.gz
@@ -14,7 +15,7 @@ cache*
 ckpt*
 
 *.log
-# *.mp4
+*.mp4
 
 notes/
 install.sh

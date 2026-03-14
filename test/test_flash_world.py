@@ -10,7 +10,7 @@ OFFLOAD_VAE = False
 OFFLOAD_TRANSFORMER_DURING_VAE = True
 
 TEXT_PROMPT = "A cozy medieval-style village square on a winter evening, with timber-framed cottages"
-IMAGE_PATH = "../data/test_case1/ref_image.png"
+IMAGE_PATH = "./data/test_case/test_image_case1/ref_image.png"
 NUM_FRAMES = 16
 IMAGE_HEIGHT = 480
 IMAGE_WIDTH = 704
@@ -24,7 +24,7 @@ CUSTOM_PLY_DIR = "./output/flash_world/custom_ply"
 CUSTOM_SPZ_DIR = "./output/flash_world/custom_spz"
 CUSTOM_VIDEO_DIR = "./output/flash_world/custom_video"
 
-INTERACTIONS = ["camera_l", "forward"]
+INTERACTIONS = ["forward", "camera_l", "right", "camera_zoom_in"]
 
 pipeline = FlashWorldPipeline.from_pretrained(
     model_path=MODEL_PATH,

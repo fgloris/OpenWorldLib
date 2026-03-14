@@ -15,12 +15,65 @@ Extension repo：[[3D generation]](https://github.com/zengbohan0217/OpenWorldLib
 
 </div>
 
+<!-- add demo -->
+<div align="center">
+<figure style="display:inline-block; text-align:center; margin:8px;">
+  <img src="https://github.com/user-attachments/assets/1c328d17-ef94-4d53-8dc2-f77ec3964a74" width="218" height="120">
+  <figcaption>Matrix-Game-2</figcaption>
+</figure>
+<figure style="display:inline-block; text-align:center; margin:8px;">
+  <img src="https://github.com/user-attachments/assets/2fac45f5-d365-4794-bf38-45aee58f3d45" width="218" height="120">
+  <figcaption>Hunyuan-GameCraft</figcaption>
+</figure>
+<figure style="display:inline-block; text-align:center; margin:8px;">
+  <img src="" width="218" height="120">
+  <figcaption>Hunyuan-Worldplay</figcaption>
+</figure>
+<br/>
+<figure style="display:inline-block; text-align:center; margin:8px;">
+  <img src="" width="218" height="120">
+  <figcaption>Lingbot-World</figcaption>
+</figure>
+<figure style="display:inline-block; text-align:center; margin:8px;">
+  <img src="" width="218" height="120">
+  <figcaption>YUME-1.5</figcaption>
+</figure>
+<figure style="display:inline-block; text-align:center; margin:8px;">
+  <img src="" width="218" height="120">
+  <figcaption>FlashWorld</figcaption>
+</figure>
+<br/>
+<figure style="display:inline-block; text-align:center; margin:8px;">
+  <img src="https://github.com/user-attachments/assets/c4fa5245-e837-4e47-a4e4-585a61358f91" width="218" height="120">
+  <figcaption>Wan-2.2</figcaption>
+</figure>
+<figure style="display:inline-block; text-align:center; margin:8px;">
+  <img src="https://github.com/user-attachments/assets/a47b2e0e-b62c-45fb-bb99-6377f53e3f5e" width="218" height="120">
+  <figcaption>WoW</figcaption>
+</figure>
+<figure style="display:inline-block; text-align:center; margin:8px;">
+  <img src="" width="218" height="120">
+  <figcaption>Cosmos-Predict-2.5</figcaption>
+</figure>
+<br/>
+<figure style="display:inline-block; text-align:center; margin:8px;">
+  <img src="" width="218" height="120">
+  <figcaption>VGGT/Pi3</figcaption>
+</figure>
+<figure style="display:inline-block; text-align:center; margin:8px;">
+  <img src="https://github.com/user-attachments/assets/dab9c489-fcb8-412d-99af-9fdad4e76e0e" width="120" height="120">
+  <figcaption>Libero</figcaption>
+</figure>
+<figure style="display:inline-block; text-align:center; margin:8px;">
+  <img src="https://github.com/user-attachments/assets/f8b4253b-9172-4afa-bd0e-ae0bc7ea8b25" width="120" height="120">
+  <figcaption>Ai2-THOR</figcaption>
+</figure> 
+</div>
 
 We define a world model as: **A model or framework centered on perception, equipped with interaction and long-term memory capabilities, for understanding and predicting the complex world.** Accordingly, 🎓 *Multimodal Understanding*, 🤖 *Visual Action Prediction*, and 🖼️ *Visual Generation* are all sub-tasks that a world model needs to accomplish.
 
 We warmly welcome researchers to share their views on this framework or thoughts on world models in the Issues section. We also hope that you can submit valuable world-model-related methods to our framework via Pull Requests, or document and submit them to [[awesome_world_models]](docs/awesome_world_model.md). Feel free to give our repo a star 🌟 to follow the latest progress of OpenWorldLib!
 
-<!-- the demonstration demo insert here -->
 
 ### Important Docs <!-- omit in toc -->
 The following three documents are essential to this project (click to navigate):

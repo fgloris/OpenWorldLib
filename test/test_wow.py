@@ -14,8 +14,7 @@ def save_video_to_file(
     return output_path
 
 
-
-input_path = "./data/test_vla_image_case1/init_frame.png"  # 可以是图片或视频
+input_path = "./data/test_case/test_vla_image_case1/init_frame.png"  # 可以是图片或视频
 text_prompt = "Put the screw driver into the drawer."
 output_path = "./wow_output.mp4"
 

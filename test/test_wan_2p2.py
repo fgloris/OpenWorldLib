@@ -1,7 +1,6 @@
 from pathlib import Path
 from PIL import Image
 
-
 from openworldlib.pipelines.wan.pipeline_wan_2p2 import Wan2p2Pipeline
 from openworldlib.base_models.diffusion_model.video.wan_2p2.utils.utils import save_video
 from openworldlib.base_models.diffusion_model.video.wan_2p2.configs import WAN_CONFIGS
@@ -16,7 +15,7 @@ pipeline = Wan2p2Pipeline.from_pretrained(
     rank=0,
 )
 
-image_path: str = "path to image"
+image_path: str = "./data/test_case/test_image_case1/ref_image.png"
 images = Image.open(image_path).convert('RGB')
 
 output_video = pipeline(

@@ -114,6 +114,8 @@ class MatrixGame2Pipeline:
                  **kwds):
         if not visualize_warning:
             logging.getLogger("torch._dynamo").setLevel(logging.ERROR)
+            logging.getLogger("torch._inductor.autotune_process").setLevel(logging.WARNING)
+            logging.getLogger("torch._inductor").setLevel(logging.WARNING)
         if isinstance(images, Image.Image):
             input_image = images
         else:
