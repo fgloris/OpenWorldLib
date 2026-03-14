@@ -4,10 +4,10 @@ import numpy as np
 from diffusers.utils import export_to_video
 from PIL import Image
 from decord import VideoReader
-from openworldlib.pipelines.yume.pipeline_yume_1p5 import Yume1p5Pipeline
+from openworldlib.pipelines.yume.pipeline_yume import YumePipeline
 
 
-pretrained_model_path = "stdstu123/Yume-5B-720P"
+pretrained_model_path = "stdstu123/Yume-I2V-540P"
 prompt = "A fire-breathing dragon appeared." # needed for t2v
 image_path = "./data/test_case1/ref_image.png"  # needed for i2v, set None for t2v or v2v
 video_path = None # needed for v2v, set None for t2v or i2v
@@ -15,7 +15,8 @@ interactions = ["forward", "camera_l"]  # list, e.g., ["forward", "camera_l", "f
 interaction_speeds=[100, 4] # camera movement speed: xxx meters per second; camera rotation speed: xxx
 interaction_distances=[4, None] # camera movement distance: xxx; camera rotation distance: None
 seed = 43
-size = '704*1280' # e.g., '704*1280', '1280*704'
+size = '544*960' # e.g., '544*960', '960*544'
+sampling_method = "ode"  # "ode" (default) or "sde"
 
 
 # Determine task type and prepare inputs
@@ -67,10 +68,10 @@ elif image_path is None and video_path is None:
 else:
     raise ValueError("Only one of `image_path` or `video_path` can be provided, not both.")
 
-assert interactions, "Interactions must be provided when using video input."
+assert interactions, "Interactions must be provided."
 assert len(interactions) == len(interaction_speeds) == len(interaction_distances), "interactions, interaction_speeds, and interaction_distances must have the same length"
 
-pipeline = Yume1p5Pipeline.from_pretrained(
+pipeline = YumePipeline.from_pretrained(
     model_path=pretrained_model_path,
     device="cuda",
     weight_dtype=torch.bfloat16,
@@ -86,9 +87,10 @@ output_video = pipeline(
     videos=videos, # None or list of PIL images from one video
     size=size,
     seed=seed,
-    task_type=task_type
+    task_type=task_type,
+    sampling_method=sampling_method,
 )
 
 if torch.distributed.get_rank() == 0:
-    export_to_video(output_video, "./yume_1p5_demo.mp4", fps=16)
+    export_to_video(output_video, "./yume_demo.mp4", fps=16)
     print("Video saved successfully.")

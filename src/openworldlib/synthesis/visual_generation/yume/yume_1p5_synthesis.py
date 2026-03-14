@@ -124,12 +124,12 @@ class Yume1p5Synthesis(BaseSynthesis):
             caption += INTERACTION_SPEED_and_DISTANCE_2_CAPTION_DICT[interaction_type].format(
                 speed=interaction_speed
             )
-        
-        prompt = prompt if prompt else ""
-        caption += prompt
 
 
         if interaction_idx == 0: # first interaction
+            prompt = prompt if prompt else ""
+            caption = prompt + caption
+
             if task_type != "t2v":
 
                 if task_type == "i2v":
