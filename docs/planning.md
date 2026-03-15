@@ -35,7 +35,7 @@ Status Legend: ✅ Completed; 🚧 In Progress; 🔄 Ongoing; 📝 Not Started.
 - The current repository may still contain some redundant code, which we will further streamline;
 - The interactions between different modules are not yet seamless enough. We will work towards enabling more flexible and natural integration between components;
 - The performance of some existing methods still requires further improvement, specifically:
-  - The rendering effectiveness of vggt should improve;
+- The rendering effectiveness of vggt should improve;
 
 
 ### Roadmap

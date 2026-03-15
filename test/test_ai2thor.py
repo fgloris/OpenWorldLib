@@ -23,7 +23,7 @@ def load_json_policy(path):
     return policy
 
 
-policy = load_json_policy("./data/test_sim_policy_case1/thor/test.json")
+policy = load_json_policy("./data/test_case/test_sim_policy_case1/thor/test.json")
 
 # 请从QUALITY_SETTINGS选择quality: {"DONOTUSE": 0, "High": 5, "High WebGL": 8, "Low": 2, "Medium": 3, "MediumCloseFitShadows": 4, "Ultra": 7, "Very High": 6, "Very Low": 1}
 rep_cfg = dict(
