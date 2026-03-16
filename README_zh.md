@@ -43,7 +43,7 @@
     <b>YUME-1.5</b>
   </td>
   <td align="center">
-    <img src="" width="218" height="120"><br/>
+    <img src="https://github.com/user-attachments/assets/c6b176fd-1ebe-4760-ab2f-6f2ba20445ca" width="218" height="120"><br/>
     <b>FlashWorld</b>
   </td>
 </tr>
@@ -63,8 +63,8 @@
 </tr>
 <tr>
   <td align="center">
-    <img src="" width="218" height="120"><br/>
-    <b>VGGT/Pi3</b>
+    <img src="https://github.com/user-attachments/assets/68c59c52-35c5-400c-a5a0-94c8eb802a79" width="218" height="120"><br/>
+    <b>Pi3</b>
   </td>
   <td align="center">
     <img src="https://github.com/user-attachments/assets/dab9c489-fcb8-412d-99af-9fdad4e76e0e" width="120" height="120"><br/>
