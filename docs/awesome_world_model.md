@@ -56,6 +56,7 @@
 - **Awesome World Model Evolution - Forging the World Model Universe from Unified Multimodal Models** · [[Paper]](#) [[Code]](https://github.com/OpenRaiser/awesome-world-model-evolution)
 - **Awesome-Efficient-Video-Generation** · [[Paper]](#) [[Code]](https://github.com/oahzxl/Awesome-Efficient-Video-Generation)
 - **Awesome-World-Models** · [[Paper]](#) [[Code]](https://github.com/knightnemo/Awesome-World-Models)
+- **OpenMM-Arena** · [[Paper]](#) [[Code]](https://github.com/OpenEnvision-Lab/OpenMM-Arena)
 - **Awesome-From-Video-Generation-to-World-Model** · [[Paper]](https://arxiv.org/pdf/2511.08585) [[Code]](https://github.com/ziqihuangg/Awesome-From-Video-Generation-to-World-Model)
 - **Awesome-Video-World-Models-with-AR-Diffusion** · [[Paper]](#) [[Code]](https://github.com/gracezhao1997/Awesome-Video-World-Models-with-AR-Diffusion)
 - **Unified Operator on Interactive World Model** · [[Paper]](#) [[Code]](https://github.com/Rising0321/WMFactory)
@@ -466,6 +467,7 @@
 - **VinoGround** · [[Paper]](https://arxiv.org/pdf/2410.02763) [[Code]](https://github.com/Vinoground/Vinoground)
 - **ShortVIdBench** · [[Paper]](https://www.emergentmind.com/topics/shortvid-bench) [[Code]](https://github.com/TencentARC/ARC-Hunyuan-Video-7B)
 - **Motion-Bench** · [[Paper]](https://arxiv.org/pdf/2501.02955) [[Code]](https://github.com/zai-org/MotionBench)
+- **OpenMM-Arena** · [[Code]](https://github.com/OpenEnvision-Lab/OpenMM-Arena)
 - **Human-MME: A Holistic Evaluation Benchmark for Human-Centric Multimodal Large Language Models** · [[Paper]](https://arxiv.org/abs/2509.26165) [[Code]](https://github.com/Yuan-Hou/Human-MME)
 </details>
 
