@@ -8,7 +8,7 @@ import os
 from PIL import Image
 from typing import Optional, Any
 from ..pipeline_utils import PipelineABC
-from ...operators.hunyuan_world_voager_operator import HunyuanWorldVoyagerOperator
+from ...operators.hunyuan_world_voager_operator import HunyuanWorldVoyagerOperator, camera_list
 from ...representations.point_clouds_generation.hunyuan_world.hunyuan_world_voyager_representation import HunyuanWorldVoyagerRepresentation
 from ...synthesis.visual_generation.hunyuan_world.hunyuan_world_voyager_synthesis import HunyuanWorldVoyagerSynthesis
 from ...synthesis.visual_generation.hunyuan_world.hunyuan_world_voyager.config import parse_args
@@ -100,34 +100,88 @@ class HunyuanWorldVoyagerPipeline(PipelineABC):
         input_image, image_tensor = self.operators.process_perception(input_image, self.device)
         Height, Width = input_image.shape[:2] if hasattr(input_image, 'shape') else (256, 256)
         
-        # generate intrinsics and extrinsics for the first frame based on the interaction signal
-        self.operators.get_interaction(interaction_signal)
-        intrinsics, extrinsics = self.operators.process_interaction(
-            num_frames=1, Width=Width, Height=Height, fx=256, fy=256
-        )
+        # check interaction signal and generate intrinsics and extrinsics for the video
+        if isinstance(interaction_signal, str):
+            # single interaction
+            self.operators.get_interaction(interaction_signal)
+            intrinsics, extrinsics = self.operators.process_interaction(
+                num_frames=1, Width=Width, Height=Height, fx=256, fy=256
+            )
+            
+            # generate representation (points, colors, depth) based on the input image and camera parameters
+            input_data = {
+                'image': input_image,
+                'image_tensor': image_tensor,
+                'intrinsics': intrinsics,
+                'extrinsics': extrinsics
+            }
+            points, colors, depth = self.represent_model.get_representation(input_data)
         
-        # generate representation (points, colors, depth) based on the input image and camera parameters
-        input_data = {
-            'image': input_image,
-            'image_tensor': image_tensor,
-            'intrinsics': intrinsics,
-            'extrinsics': extrinsics
-        }
-        points, colors, depth = self.represent_model.get_representation(input_data)
+            # generate intrinsics and extrinsics for the whole video based on the interaction signal
+            intrinsics, extrinsics = self.operators.process_interaction(
+                num_frames=49, Width=Width//2, Height=Height//2, fx=128, fy=128
+            )
+            self.operators.delete_last_interaction()
+            
+            # rendering the video
+            render_list, mask_list, depth_list = self.represent_model.render_video(
+                points, colors, extrinsics, intrinsics, height=Height//2, width=Width//2
+            )
+        elif isinstance(interaction_signal, list):
+            # 交互序列 - 多轮逻辑
+            # 使用第一个交互生成 representation
+            first_interaction = interaction_signal[0]
+            self.operators.get_interaction(first_interaction)
+            intrinsics_first, extrinsics_first = self.operators.process_interaction(
+                num_frames=1, Width=Width, Height=Height, fx=256, fy=256
+            )
+            
+            input_data = {
+                'image': input_image,
+                'image_tensor': image_tensor,
+                'intrinsics': intrinsics_first,
+                'extrinsics': extrinsics_first
+            }
+            points, colors, depth = self.represent_model.get_representation(input_data)
+            
+            # 计算每段帧数
+            num_interactions = len(interaction_signal)
+            num_frames_per_interaction = 49 // num_interactions
+            remaining_frames = 49 % num_interactions
+            
+            all_intrinsics = []
+            all_extrinsics = []
+            prev_extrinsic = None  # ← 新增：用于传递上一段末帧位姿
+            
+            for i, interaction in enumerate(interaction_signal):
+                frames_for_this = num_frames_per_interaction + (1 if i < remaining_frames else 0)
+                self.operators.interaction_history.append(interaction)
+                intrinsics, extrinsics = camera_list(
+                    num_frames=frames_for_this,
+                    type=interaction,
+                    Width=Width//2,
+                    Height=Height//2,
+                    fx=128,
+                    fy=128,
+                    prev_extrinsic=prev_extrinsic  # ← 传入上一段末帧
+                )
+                all_intrinsics.append(intrinsics)
+                all_extrinsics.append(extrinsics)
+                prev_extrinsic = extrinsics[-1]  # ← 保存本段末帧供下一段使用
+            
+            # concatenate all intrinsics and extrinsics
+            intrinsics = np.concatenate(all_intrinsics, axis=0)
+            extrinsics = np.concatenate(all_extrinsics, axis=0)
+            
+            # rendering the coarse video
+            render_list, mask_list, depth_list = self.represent_model.render_video(
+                points, colors, extrinsics, intrinsics, height=Height//2, width=Width//2
+            )
+        else:
+            raise ValueError(f"interaction_signal must be a string or list, got {type(interaction_signal)}")
         
-        # generate intrinsics and extrinsics for the whole video based on the interaction signal
-        intrinsics, extrinsics = self.operators.process_interaction(
-            num_frames=49, Width=Width//2, Height=Height//2, fx=128, fy=128
-        )
-        self.operators.delete_last_interaction()
-        
-        # rendering the video
-        render_list, mask_list, depth_list = self.represent_model.render_video(
-            points, colors, extrinsics, intrinsics, height=Height//2, width=Width//2
-        )
         hunyuan_video_input = self.rendering_model.create_hunyuan_video_input(render_list, mask_list, depth_list,
-                                                                              Width=Width, Height=Height)
-
+                                                                            Width=Width, Height=Height)
         if self.save_representation_video:
             self.represent_model.save_representation_video(
                 render_list, mask_list, depth_list, self.rendering_args.input_path, separate=True, 
