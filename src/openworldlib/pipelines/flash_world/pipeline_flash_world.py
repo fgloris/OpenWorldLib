@@ -219,9 +219,13 @@ class FlashWorldPipeline:
         if input_ is not None:
             image = self.operator.process_perception(input_)
         
-        # Process interaction
-        text_prompt = interaction.get('text_prompt', "")
-        cameras = interaction.get('cameras')
+        # Process interaction (__call__ historically passed "prompt"; keep both keys in sync)
+        text_prompt = (
+            interaction.get("text_prompt")
+            or interaction.get("prompt")
+            or ""
+        )
+        cameras = interaction.get("cameras")
         
         # Convert cameras to tensor if needed
         if isinstance(cameras, list):
@@ -297,6 +301,7 @@ class FlashWorldPipeline:
         self,
         images: Union[str, Image.Image, np.ndarray, torch.Tensor, None],
         prompt: str = "",
+        text_prompt: Optional[str] = None,
         interactions: Optional[List[str]] = None,
         camera_view: Union[torch.Tensor, List[Dict[str, Any]]] = None,
         num_frames: int = 16,
@@ -312,23 +317,33 @@ class FlashWorldPipeline:
         
         Args:
             input_: Input image (path, PIL Image, numpy array, tensor, or None)
-            text_prompt: Text description for scene generation
+            prompt: Text description for scene generation (alias: text_prompt)
+            text_prompt: Same as prompt if provided
             cameras: Camera parameters (tensor or list of dicts). Ignored if interactions is provided.
-            interactions: List of interaction strings (e.g., ["camera_rotate_left", "camera_forward"]).
-                          If provided, cameras will be generated from these interactions.
+            interactions: List of interaction strings (e.g., ["camera_l", "forward"]).
+                          If provided (non-empty), cameras will be generated from these interactions.
             num_frames: Number of frames
             image_height: Output image height
             image_width: Output image width
             return_video: If True, return video frames as List[PIL.Image]
             video_fps: FPS for video rendering
-            **kwargs: Additional arguments
+            **kwargs: ``interaction`` (singular) is accepted as an alias for ``interactions``;
+                ``text_prompt`` may also be passed here for compatibility.
             
         Returns:
             If return_video=True: List[PIL.Image] of video frames
             Otherwise: Dict with scene_params, ref_w2c, T_norm
         """
+        if text_prompt is not None:
+            prompt = text_prompt
+        if kwargs.get("text_prompt") is not None:
+            prompt = kwargs.pop("text_prompt")
+        # Common typo: interaction= [...] — would otherwise land in **kwargs and force default cameras
+        if interactions is None and kwargs.get("interaction") is not None:
+            interactions = kwargs.pop("interaction")
+
         # Process interactions if provided
-        if interactions is not None:
+        if interactions:
             # Clear previous interactions
             self.operator.current_interaction = []
             # Add new interactions
@@ -341,11 +356,12 @@ class FlashWorldPipeline:
                 image_height=image_height
             )
             camera_view = interaction_result['cameras']
-        elif camera_view is not None:
-            # Create default cameras if not provided
+        elif camera_view is None:
+            # No interactions and no explicit cameras: use default circular path
             camera_view = self._create_default_cameras(num_frames, image_width, image_height)
         
         interaction = {
+            'text_prompt': prompt,
             'prompt': prompt,
             'cameras': camera_view,
         }
@@ -370,46 +386,8 @@ class FlashWorldPipeline:
         image_width: int,
         image_height: int
     ) -> List[Dict[str, Any]]:
-        """
-        Create default camera trajectory (circular path).
-        
-        Args:
-            num_frames: Number of frames
-            image_width: Image width
-            image_height: Image height
-            
-        Returns:
-            List of camera dictionaries
-        """
-        cameras = []
-        radius = 2.0
-        
-        for i in range(num_frames):
-            angle = 2 * np.pi * i / num_frames
-            
-            # Circular camera path
-            x = radius * np.cos(angle)
-            z = radius * np.sin(angle)
-            y = 0.5
-            
-            # Look at origin
-            direction = np.array([-x, -y, -z])
-            direction = direction / (np.linalg.norm(direction) + 1e-8)
-            
-            # Simple quaternion (simplified, should use proper rotation)
-            quat = [1.0, 0.0, 0.0, 0.0]  # Identity rotation
-            
-            camera = {
-                'position': [float(x), float(y), float(z)],
-                'quaternion': quat,
-                'fx': image_width * 0.7,
-                'fy': image_height * 0.7,
-                'cx': image_width * 0.5,
-                'cy': image_height * 0.5,
-            }
-            cameras.append(camera)
-        
-        return cameras
+        """Delegate to :class:`FlashWorldOperator` so defaults match interaction physics."""
+        return self.operator._create_default_cameras(num_frames, image_width, image_height)
     
     def save_results(
         self,
