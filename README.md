@@ -119,6 +119,7 @@ OpenWorldLib covers the following research directions related to **World Models*
 | :--- | :--- | :--- |
 | **Video Generation** | Navigation Generation | lingbot, matrix-game, hunyuan-worldplay, genie3, etc. |
 | | Long Video Generation | sora-2, veo-3, wan, etc. |
+| | Egocentric Interaction Generation | Hand2World, etc. |
 | **3D Scene Generation** | 3D Scene Generation | flash-world, vggt, etc. |
 | **Reasoning** | VQA (Visual Question Answering) | spatialVLM, omnivinci and other VLMs with world understanding |
 | | VLA (Vision-Language-Action) | pi-0, pi-0.5, giga-brain, etc. |

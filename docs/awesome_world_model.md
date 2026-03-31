@@ -411,6 +411,7 @@
 - **lingbot-va** · [[Paper]](https://arxiv.org/pdf/2601.21998) [[Code]](https://github.com/Robbyant/lingbot-va)
 - **WoW** · [[Paper]](https://arxiv.org/pdf/2509.22642) [[Code]](https://github.com/wow-world-model/wow-world-model)
 - **Cosmos** · [[Paper]](https://arxiv.org/pdf/2501.03575) [[Code]](https://github.com/nvidia-cosmos/cosmos-predict1)
+- **Hand2World** · [[Paper]](https://arxiv.org/abs/2602.09600) [[Code]](https://github.com/NTUYWANG103/Hand2World)
 </details>
 
 <details>
