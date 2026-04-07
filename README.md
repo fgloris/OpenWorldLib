@@ -123,7 +123,7 @@ OpenWorldLib covers the following research directions related to **World Models*
 | **3D Scene Generation** | 3D Scene Generation | flash-world, vggt, etc. |
 | **Reasoning** | VQA (Visual Question Answering) | spatialVLM, omnivinci and other VLMs with world understanding |
 | | VLA (Vision-Language-Action) | pi-0, pi-0.5, giga-brain, etc. |
-
+> Commonly used inference frameworks include: [diffusers](https://github.com/huggingface/diffusers), [DiffSynth](https://github.com/modelscope/DiffSynth-Studio), [LightX2V](https://github.com/ModelTC/LightX2V)
 
 ### Getting Started
 #### Installation
