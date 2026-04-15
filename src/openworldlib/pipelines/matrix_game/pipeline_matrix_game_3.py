@@ -1,7 +1,11 @@
 from pathlib import Path
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Union
 
+import numpy as np
+import torch
 from PIL import Image
+from einops import rearrange
+from diffusers.utils import export_to_video
 
 from ...operators.matrix_game_3_operator import MatrixGame3Operator
 from ...synthesis.visual_generation.matrix_game.matrix_game_3_synthesis import MatrixGame3Synthesis
@@ -79,8 +83,11 @@ class MatrixGame3Pipeline:
         lightvae_pruning_rate: Optional[float] = None,
         vae_type: str = "mg_lightvae_v2",
         use_base_model: bool = False,
+        save_video: bool = True,
+        return_result: bool = False,
+        video_save_path: Optional[Union[str, Path]] = None,
         **kwargs,
-    ) -> str:
+    ) -> Any:
         if not isinstance(images, Image.Image):
             raise ValueError("MatrixGame3Pipeline expects `images` to be a PIL.Image.")
         if self.synthesis_model is None:
@@ -89,7 +96,8 @@ class MatrixGame3Pipeline:
         processed_inputs = self.process(images, interactions=interactions)
 
         prompt_text = prompt or "A first-person view interactive scene."
-        return self.synthesis_model.predict(
+        need_payload = return_result or (video_save_path is not None)
+        prediction: Any = self.synthesis_model.predict(
             image=processed_inputs["image"],
             prompt=prompt_text,
             interactions=interactions,
@@ -111,8 +119,42 @@ class MatrixGame3Pipeline:
             lightvae_pruning_rate=lightvae_pruning_rate,
             vae_type=vae_type,
             use_base_model=use_base_model,
+            save_video=save_video,
+            return_result=need_payload,
             **kwargs,
         )
+
+        if video_save_path is not None:
+            if not isinstance(prediction, dict):
+                raise RuntimeError("Expected payload dict when `video_save_path` is set.")
+            video_tensor = prediction.get("video_tensor")
+            if video_tensor is None:
+                raise RuntimeError("Pipeline did not return `video_tensor`; cannot save to custom path.")
+            saved_path = self.save_video_tensor(video_tensor, video_save_path)
+            prediction["video_path"] = saved_path
+
+        if return_result:
+            return prediction
+        if video_save_path is not None:
+            return str(Path(video_save_path))
+        return prediction
+
+    @staticmethod
+    def save_video_tensor(video_tensor: torch.Tensor, save_path: Union[str, Path], fps: int = 17) -> str:
+        path = Path(save_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        video_np = np.ascontiguousarray(
+            ((rearrange(video_tensor, "C T H W -> T H W C").float() + 1) * 127.5)
+            .clip(0, 255)
+            .detach()
+            .cpu()
+            .numpy()
+            .astype(np.uint8)
+        )
+        export_to_video([frame / 255.0 for frame in video_np], str(path), fps=fps)
+        return str(path)
+
 
     def stream(
         self,

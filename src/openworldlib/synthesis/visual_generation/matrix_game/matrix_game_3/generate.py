@@ -8,11 +8,14 @@ import torch
 import torch.distributed as dist
 warnings.filterwarnings('ignore')
 from PIL import Image
-from wan.configs import MAX_AREA_CONFIGS, WAN_CONFIGS
-from wan.distributed.util import init_distributed_group
-from pipeline.inference_interactive_pipeline import MatrixGame3Pipeline as MatrixGame3InteractivePipeline
-from pipeline.inference_pipeline import MatrixGame3Pipeline
-from utils.misc import set_seed
+
+from .wan.configs import MAX_AREA_CONFIGS, WAN_CONFIGS
+from .....base_models.diffusion_model.video.wan_2p2.distributed.util import (
+    init_distributed_group,
+)
+from .pipeline.inference_interactive_pipeline import MatrixGame3Pipeline as MatrixGame3InteractivePipeline
+from .pipeline.inference_pipeline import MatrixGame3Pipeline
+from .utils.misc import set_seed
 def _validate_args(args):
     if args.ulysses_size <= 1:
         if args.t5_fsdp or args.dit_fsdp:

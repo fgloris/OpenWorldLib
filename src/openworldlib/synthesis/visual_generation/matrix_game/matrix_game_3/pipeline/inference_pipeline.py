@@ -16,17 +16,28 @@ from PIL import Image
 from tqdm import tqdm
 from einops import rearrange
 from functools import partial
-from wan.distributed.fsdp import shard_model
-from wan.distributed.sequence_parallel import sp_attn_forward, sp_dit_forward
-from wan.distributed.util import get_world_size
-from wan.modules import WanModel
-from wan.modules.t5 import T5EncoderModel
-from wan.modules.vae2_2 import Wan2_2_VAE
-from wan.utils.fm_solvers_unipc import FlowUniPCMultistepScheduler
-from utils.visualize import process_video
-from utils.cam_utils import compute_relative_poses, select_memory_idx_fov, get_intrinsics, _interpolate_camera_poses_handedness
-from utils.utils import get_data, build_plucker_from_c2ws, build_plucker_from_pose
-from pipeline.vae_worker import start_vae_worker_process
+
+from ......base_models.diffusion_model.video.wan_2p2.distributed.fsdp import shard_model
+from ......base_models.diffusion_model.video.wan_2p2.distributed.sequence_parallel import (
+    sp_attn_forward,
+    sp_dit_forward,
+)
+from ......base_models.diffusion_model.video.wan_2p2.distributed.util import get_world_size
+from ......base_models.diffusion_model.video.wan_2p2.modules.model import WanModel
+from ......base_models.diffusion_model.video.wan_2p1.modules.t5 import T5EncoderModel
+from ......base_models.diffusion_model.video.wan_2p2.modules.vae2_2 import Wan2_2_VAE
+from ......base_models.diffusion_model.video.wan_2p1.utils.fm_solvers_unipc import (
+    FlowUniPCMultistepScheduler,
+)
+
+from ..utils.cam_utils import (
+    compute_relative_poses,
+    select_memory_idx_fov,
+    get_intrinsics,
+    _interpolate_camera_poses_handedness,
+)
+from ..utils.utils import get_data, build_plucker_from_c2ws, build_plucker_from_pose
+from .vae_worker import start_vae_worker_process
 
 class MatrixGame3Pipeline:
     def __init__(
@@ -103,6 +114,11 @@ class MatrixGame3Pipeline:
         self.patch_size = config.patch_size
 
         self.use_async_vae = getattr(args, 'use_async_vae', False)
+        if self.use_async_vae:
+            raise NotImplementedError(
+                "use_async_vae=True is currently unsupported for tensor-first output mode. "
+                "Please set use_async_vae=False."
+            )
 
         if use_sp:
             self.sp_size = get_world_size()
@@ -137,89 +153,10 @@ class MatrixGame3Pipeline:
         else:
             use_int8 = False
         if use_int8:
-            from wan.modules.model import convert_model_to_int8, Int8Linear
-            if self.rank == 0:
-                logging.info("Now quantizing model to Int8...")
-            self.model = convert_model_to_int8(self.model, target_layers=["q", "k", "v", "o"])
-
-            if args is not None and getattr(args, 'verify_quant', False):
-                for m in self.model.modules():
-                    if isinstance(m, Int8Linear):
-                        m.verify_mode = True
-                if self.rank == 0:
-                    logging.info("DEBUG: Quantization verification mode ENABLED.")
-            
-            if dist.is_initialized():
-                if self.rank == 0:
-                    logging.info(f"[Rank {self.rank}] Starting strong Int8 weight synchronization and validation...")
-                for name, m in self.model.named_modules():
-                    if isinstance(m, Int8Linear):
-                        if hasattr(self, 'device'):
-                            m.weight_int8.data = m.weight_int8.data.to(self.device)
-                            m.weight_scales.data = m.weight_scales.data.to(self.device)
-                            if m.bias is not None:
-                                m.bias.data = m.bias.data.to(self.device)
-
-                        dist.broadcast(m.weight_int8.data, src=0)
-                        dist.broadcast(m.weight_scales.data, src=0)
-                        if m.bias is not None:
-                            dist.broadcast(m.bias.data, src=0)
-                        
-                        if getattr(args, 'verify_quant', False):
-                            w_sum_local = m.weight_int8.data.float().sum()
-                            s_sum_local = m.weight_scales.data.sum()
-                            
-                            w_sum_all = w_sum_local.clone()
-                            dist.all_reduce(w_sum_all, op=dist.ReduceOp.SUM)
-
-                            if self.rank == 0:
-                                expected_w = w_sum_local * dist.get_world_size()
-                                if not torch.allclose(w_sum_all, expected_w, atol=1e-2):
-                                    logging.info(f"❌ CRITICAL: Weight sync FAILED for {name}! LocalSum={w_sum_local:.2f}, AllSum={w_sum_all:.2f}")
-
-                                if "blocks.0." in name or "blocks.31." in name:
-                                    logging.info(f"[Rank 0] VALIDATED: Layer {name} | W_Sum: {w_sum_local:.2f} | S_Sum: {s_sum_local:.4f}")
-                dist.barrier()
-                if self.rank == 0:
-                    logging.info(f"[Rank {self.rank}] Strong Int8 weight synchronization complete.")
-            
-            if self.rank == 0:
-                def print_quant_summary():
-                    if hasattr(Int8Linear, '_global_stats'):
-                        stats = Int8Linear._global_stats
-                        k_sims = stats['kernel_sims']
-                        b_sims = stats['bf16_sims']
-                        if k_sims and b_sims:
-                            avg_k = sum(k_sims) / len(k_sims)
-                            avg_b = sum(b_sims) / len(b_sims)
-                            min_k = min(k_sims)
-                            min_b = min(b_sims)
-                            print("\n" + "="*60, flush=True)
-                            print("📊 INT8 QUANTIZATION SUMMARY", flush=True)
-                            print(f"  Total Checks:      {len(k_sims)}", flush=True)
-                            print(f"  Kernel Similarity: Avg={avg_k:.6f}, Min={min_k:.6f}", flush=True)
-                            print(f"  BF16 Similarity:   Avg={avg_b:.6f}, Min={min_b:.6f}", flush=True)
-                            
-                            max_w = stats.get('max_w', 0.0)
-                            max_x = stats.get('max_x', 0.0)
-                            max_out = stats.get('max_out', 0.0)
-                            low_sim_count = stats.get('low_sim_count', 0)
-                            total_checks = len(k_sims)
-                            low_sim_ratio = (low_sim_count / total_checks) * 100 if total_checks > 0 else 0
-                            
-                            print(f"  Max Values:        W={max_w:.2f}, In={max_x:.2f}, Out={max_out:.2f}", flush=True)
-                            print(f"  Low Sim Ratio:     {low_sim_ratio:.2f}% (Sim < 0.99)", flush=True)
-                            
-                            if avg_b > 0.999:
-                                print("  Status:            ✅ EXCELLENT", flush=True)
-                            elif avg_b > 0.99:
-                                print("  Status:            ✅ GOOD", flush=True)
-                            else:
-                                print("  Status:            ⚠️ INVESTIGATE", flush=True)
-                            print("="*60 + "\n", flush=True)
-                atexit.register(print_quant_summary)
-            if self.rank == 0:
-                logging.info("Int8 quantization complete.")
+            raise NotImplementedError(
+                "Int8 quantization for Matrix-Game-3 is not yet wired to base_models/wan_2p2. "
+                "Please run with use_int8=False."
+            )
 
         if dist.is_initialized():
              dist.barrier()
@@ -318,7 +255,10 @@ class MatrixGame3Pipeline:
         if self.rank != 0:
             return
 
-        from wan.modules.attention import FLASH_ATTN_2_AVAILABLE, FLASH_ATTN_3_AVAILABLE
+        from ......base_models.diffusion_model.video.wan_2p1.modules.attention import (
+            FLASH_ATTN_2_AVAILABLE,
+            FLASH_ATTN_3_AVAILABLE,
+        )
 
         requested_fa = getattr(args, 'fa_version', None)
         actual_fa = "None (SDPA)"
@@ -375,12 +315,17 @@ class MatrixGame3Pipeline:
                 Random seed for noise generation. If -1, use random seed
         """
         self._log_flash_attention_config(args)
-        mouse_icon = "assets/images/mouse.png"
         vae_cache = [None for _ in range(32)]
         weight_dtype = torch.bfloat16
         height = int(args.size.split("*")[0])
         width = int(args.size.split("*")[1])
         save_name = args.save_name
+
+        if self.use_async_vae:
+            raise NotImplementedError(
+                "use_async_vae=True is currently unsupported for tensor-first output mode. "
+                "Please set use_async_vae=False."
+            )
 
         clip_frame = 56
         first_clip_frame = clip_frame + 1
@@ -606,100 +551,26 @@ class MatrixGame3Pipeline:
                 img_cond = latents[:, :, -4:]
                 denoised_pred = latents if first_clip else latents[:, :, -10:]
 
-                if self.use_async_vae:
-                    if self.rank == 0:
-                        warmup_iters = getattr(args, 'async_vae_warmup_iters', 0)
-                        if clip_idx == num_iterations - 1:
-                            self.vae_latent_queue.put(
-                                {
-                                    "latent": denoised_pred.detach().cpu(),
-                                    "first_chunk": first_clip,
-                                    "clip_idx": clip_idx,
-                                    "mouse_condition_all": mouse_condition_all,
-                                    "keyboard_condition_all": keyboard_condition_all,
-                                    "interactive": False,
-                                    "save_name": save_name,
-                                }
-                            )
-                        else:
-                            self.vae_latent_queue.put(
-                                {
-                                    "latent": denoised_pred.detach().cpu(),
-                                    "first_chunk": first_clip,
-                                    "clip_idx": clip_idx,
-                                    "interactive": False,
-                                }
-                            )
-                        if clip_idx < warmup_iters:
-                            print(f" [Rank 0] ⏱️  Async VAE Warmup Sync: Waiting for decode {clip_idx + 1}/{warmup_iters}...", flush=True)
-                            ack = self.vae_ack_queue.get()
-                            assert ack == clip_idx, (ack, clip_idx)
-                            print(f" [Rank 0] ✨ Iter {clip_idx + 1} Warmup Sync Done.", flush=True)
-                        print(f" [Rank 0] Queued latent clip {clip_idx:04d} | Mean: {denoised_pred.mean():.4f}", flush=True)
-                else:
-                    if self.rank == 0:
-                        vae_profiler = {}
-                        do_compile = getattr(args, "compile_vae", False) and clip_idx >= 1
-                        vae_segment_size = int(os.environ.get("WAN_VAE_SEGMENT_SIZE", "4"))
-                        video, vae_cache = self.vae.stream_decode(
-                            denoised_pred.to(dtype=self.vae.dtype), 
-                            vae_cache, 
-                            first_chunk=first_clip, 
-                            segment_size=vae_segment_size,
-                            profiler=vae_profiler,
-                            compile_decoder=do_compile
-                        )
-                        all_videos_list.append(video.cpu())
+                if self.rank == 0:
+                    vae_profiler = {}
+                    do_compile = getattr(args, "compile_vae", False) and clip_idx >= 1
+                    vae_segment_size = int(os.environ.get("WAN_VAE_SEGMENT_SIZE", "4"))
+                    video, vae_cache = self.vae.stream_decode(
+                        denoised_pred.to(dtype=self.vae.dtype),
+                        vae_cache,
+                        first_chunk=first_clip,
+                        segment_size=vae_segment_size,
+                        profiler=vae_profiler,
+                        compile_decoder=do_compile,
+                    )
+                    all_videos_list.append(video.cpu())
                         
                 all_latents_list.append(denoised_pred)
                 current_frames = 57 if first_clip else 40
                 total_frames += current_frames
 
-            def denormalize_video(video):
-                return np.ascontiguousarray(
-                    ((rearrange(video, "C T H W -> T H W C").float() + 1) * 127.5)
-                    .clip(0, 255)
-                    .numpy()
-                    .astype(np.uint8)
-                )
-
-            if self.use_async_vae:
-                if self.rank == 0:
-                    print(f"\n[Rank 0] Diffusion finished. Latents were sent to async VAE ({self.output_dir})", flush=True)
-                    print(f"Waiting for VAE decode done signal (final 0.mp4 save continues in worker)...", flush=True)
-                    vae_wait_start = time.time()
-                    if not self.vae_done_event.wait(timeout=600):
-                        print(f"[Rank 0] VAE worker done_event wait timed out after 600s.", flush=True)
-                    vae_catchup_time = time.time() - vae_wait_start
-                    print(f"VAE decode done signal received in {vae_catchup_time:.2f}s.", flush=True)
-
-                    if hasattr(self, 'vae_process'):
-                        print(f"[Rank 0] Waiting for VAE Worker to save video and exit (PID: {self.vae_process.pid})...", flush=True)
-                        self.vae_process.join(timeout=60)
-                        if self.vae_process.is_alive():
-                            print(f"[Rank 0] VAE Worker timed out, killing it...", flush=True)
-                            self.vae_process.kill()
-                            self.vae_process.join(timeout=10)
-                        else:
-                            print(f"[Rank 0] VAE Worker finished gracefully.", flush=True)
-                video = None
-
             if self.rank == 0:
                 if len(all_videos_list) > 0:
-                    concatenated_video = denormalize_video(
-                        torch.concat(all_videos_list, dim=2)[0]
-                    )
-                    def to_numpy(x):
-                        return x[:current_end_frame_idx].float().cpu().numpy()
-                    process_video(
-                        concatenated_video.astype(np.uint8),
-                        f"{self.output_dir}/{save_name}.mp4",
-                        (to_numpy(keyboard_condition_all.squeeze(0)), to_numpy(mouse_condition_all.squeeze(0))),
-                        mouse_icon,
-                        mouse_scale=0.2,
-                        default_frame_res=(height, width),
-                    )
-                    print(f"Saved concatenated video with {len(all_videos_list)} segments")
                     video = torch.concat(all_videos_list, dim=2)[0]
                 else:
                     video = None
@@ -711,5 +582,8 @@ class MatrixGame3Pipeline:
                 dist.destroy_process_group()
             return {
                 "video": video,
-                "video_path": f"{self.output_dir}/{save_name}.mp4",
+                "video_path": None,
+                "keyboard_condition": keyboard_condition_all.squeeze(0).detach().cpu() if keyboard_condition_all is not None else None,
+                "mouse_condition": mouse_condition_all.squeeze(0).detach().cpu() if mouse_condition_all is not None else None,
+                "frame_res": (height, width),
             }

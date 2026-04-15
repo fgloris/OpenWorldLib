@@ -13,8 +13,8 @@ import json
 import argparse
 import numpy as np
 from einops import rearrange
-from utils.visualize import process_video
-from pipeline.vae_config import load_vae
+from ..utils.visualize import process_video
+from .vae_config import load_vae
 
 
 def denormalize_video(video):

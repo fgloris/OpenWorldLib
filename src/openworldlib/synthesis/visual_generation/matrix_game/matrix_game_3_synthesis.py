@@ -8,8 +8,11 @@ import numpy as np
 import torch
 from PIL import Image
 from huggingface_hub import snapshot_download
+from einops import rearrange
+from diffusers.utils import export_to_video
 
 from ...base_synthesis import BaseSynthesis
+from .matrix_game_3.utils.visualize import process_video
 
 
 class MatrixGame3Synthesis(BaseSynthesis):
@@ -71,7 +74,9 @@ class MatrixGame3Synthesis(BaseSynthesis):
             repo_name = pretrained_model_path.split("/")[-1]
             local_dir = Path.cwd() / repo_name
             local_dir.mkdir(parents=True, exist_ok=True)
-            print(f"[MatrixGame3Synthesis] Warning: local checkpoint not found, downloading from HuggingFace repo: {pretrained_model_path}")
+            print(
+                f"[MatrixGame3Synthesis] Warning: local checkpoint not found, downloading from HuggingFace repo: {pretrained_model_path}"
+            )
             model_root = str(
                 snapshot_download(
                     repo_id=pretrained_model_path,
@@ -106,7 +111,6 @@ class MatrixGame3Synthesis(BaseSynthesis):
             use_int8=False,
             verify_quant=False,
         )
-        # Keep a reference for downstream updates in `predict`.
         pipeline_args = args
 
         pipeline = UpstreamPipeline(
@@ -124,7 +128,6 @@ class MatrixGame3Synthesis(BaseSynthesis):
             use_base_model=False,
         )
         pipeline.args = pipeline_args
-        # Save utility module for runtime get_data patching.
         pipeline._mg3_utils_module = mg3_utils
 
         return cls(pipeline=pipeline, checkpoint_dir=model_root, code_dir=code_dir, device=device)
@@ -152,12 +155,13 @@ class MatrixGame3Synthesis(BaseSynthesis):
         lightvae_pruning_rate: Optional[float] = None,
         vae_type: str = "mg_lightvae_v2",
         use_base_model: bool = False,
+        save_video: bool = True,
+        return_result: bool = False,
         **kwargs,
-    ) -> str:
+    ) -> Any:
         out_dir = Path(output_dir or (Path.cwd() / "output" / "matrix_game_3"))
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        # Update the args object stored inside upstream pipeline (it reads from args.*).
         args = getattr(self.pipeline, "args", None)
         if args is None:
             args = SimpleNamespace()
@@ -175,18 +179,14 @@ class MatrixGame3Synthesis(BaseSynthesis):
         args.use_int8 = bool(use_int8)
         args.verify_quant = bool(verify_quant)
 
-        # Ensure fa_version is updated (upstream uses self.fa_version).
         self.pipeline.fa_version = str(fa_version)
 
-        # Resolve max_area based on size string.
         try:
             h_str, w_str = str(size).split("*")
             max_area = int(h_str) * int(w_str)
         except Exception:
             max_area = 704 * 1280
 
-        # Inject external action conditions if provided by OpenWorldLib operator.
-        # Upstream MG3 defaults to internally generated benchmark actions.
         restore_get_data = None
         if operator_condition is not None:
             keyboard = operator_condition.get("keyboard_condition")
@@ -213,9 +213,8 @@ class MatrixGame3Synthesis(BaseSynthesis):
 
                         transform = mg3_utils.get_video_transform(height, width, normalize_to_neg_one_to_one)
                         input_image = transform(input_image)
-                        input_image = input_image.transpose(0, 1).unsqueeze(0)  # b c t h w
+                        input_image = input_image.transpose(0, 1).unsqueeze(0)
 
-                        # Align to requested frame count.
                         if keyboard.shape[0] >= num_frames:
                             kb = keyboard[:num_frames]
                             ms = mouse[:num_frames]
@@ -241,7 +240,6 @@ class MatrixGame3Synthesis(BaseSynthesis):
                             ms.to(device, dtype).unsqueeze(0),
                         )
 
-                    # Patch both utils.get_data and the symbol imported in inference_pipeline.py
                     mg3_utils.get_data = _patched_get_data
                     inf_mod = sys.modules.get(self.pipeline.__class__.__module__)
                     if inf_mod is not None:
@@ -270,10 +268,47 @@ class MatrixGame3Synthesis(BaseSynthesis):
             if restore_get_data is not None:
                 restore_get_data()
 
-        video_path = result.get("video_path")
-        if not video_path:
-            video_path = str(out_dir / f"{save_name}.mp4")
-        if not Path(video_path).exists():
-            raise FileNotFoundError(f"Matrix-Game-3 did not produce expected video: {video_path}")
-        return str(video_path)
+        video_tensor = result.get("video")
+        if video_tensor is None:
+            raise RuntimeError("Matrix-Game-3 did not return `video` tensor.")
 
+        keyboard_condition = result.get("keyboard_condition")
+        mouse_condition = result.get("mouse_condition")
+        frame_res = result.get("frame_res", (704, 1280))
+
+        video_path = str(out_dir / f"{save_name}.mp4")
+        if save_video:
+            video_np = np.ascontiguousarray(
+                ((rearrange(video_tensor, "C T H W -> T H W C").float() + 1) * 127.5)
+                .clip(0, 255)
+                .detach()
+                .cpu()
+                .numpy()
+                .astype(np.uint8)
+            )
+            mouse_icon = Path(self.code_dir) / "assets" / "images" / "mouse.png"
+            if keyboard_condition is not None and mouse_condition is not None and mouse_icon.exists():
+                process_video(
+                    video_np,
+                    video_path,
+                    (
+                        keyboard_condition.float().cpu().numpy(),
+                        mouse_condition.float().cpu().numpy(),
+                    ),
+                    str(mouse_icon),
+                    mouse_scale=0.2,
+                    default_frame_res=tuple(frame_res),
+                )
+            else:
+                # Fallback without control overlay when icon or conditions are unavailable.
+                export_to_video([frame / 255.0 for frame in video_np], video_path, fps=17)
+
+        payload = {
+            "video_tensor": video_tensor,
+            "video_path": video_path if save_video else None,
+            "keyboard_condition": keyboard_condition,
+            "mouse_condition": mouse_condition,
+        }
+        if return_result:
+            return payload
+        return payload["video_path"]

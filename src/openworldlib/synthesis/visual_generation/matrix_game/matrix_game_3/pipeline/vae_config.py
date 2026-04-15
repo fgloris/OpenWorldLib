@@ -1,6 +1,6 @@
 import os
 import torch
-from wan.modules.vae2_2 import Wan2_2_VAE
+from ......base_models.diffusion_model.video.wan_2p2.modules.vae2_2 import Wan2_2_VAE
 VAE_DTYPE = torch.bfloat16
 
 def _parse_lightvae_pruning_rate(value):

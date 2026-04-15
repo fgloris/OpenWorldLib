@@ -15,18 +15,36 @@ from PIL import Image
 from tqdm import tqdm
 from einops import rearrange
 from functools import partial
-from wan.distributed.fsdp import shard_model
-from wan.distributed.sequence_parallel import sp_attn_forward, sp_dit_forward
-from wan.distributed.util import get_world_size
-from wan.modules import WanModel
-from wan.modules.t5 import T5EncoderModel
-from wan.modules.vae2_2 import Wan2_2_VAE
-from wan.utils.fm_solvers_unipc import FlowUniPCMultistepScheduler
-from utils.visualize import process_video
-from utils.cam_utils import compute_relative_poses, select_memory_idx_fov, get_intrinsics, _interpolate_camera_poses_handedness
-from utils.utils import get_data, build_plucker_from_c2ws, build_plucker_from_pose, compute_all_poses_from_actions, get_extrinsics
-from utils.conditions import Bench_actions_universal
-from pipeline.vae_worker import start_vae_worker_process
+
+from ......base_models.diffusion_model.video.wan_2p2.distributed.fsdp import shard_model
+from ......base_models.diffusion_model.video.wan_2p2.distributed.sequence_parallel import (
+    sp_attn_forward,
+    sp_dit_forward,
+)
+from ......base_models.diffusion_model.video.wan_2p2.distributed.util import get_world_size
+from ......base_models.diffusion_model.video.wan_2p2.modules.model import WanModel
+from ......base_models.diffusion_model.video.wan_2p1.modules.t5 import T5EncoderModel
+from ......base_models.diffusion_model.video.wan_2p2.modules.vae2_2 import Wan2_2_VAE
+from ......base_models.diffusion_model.video.wan_2p1.utils.fm_solvers_unipc import (
+    FlowUniPCMultistepScheduler,
+)
+
+from ..utils.visualize import process_video
+from ..utils.cam_utils import (
+    compute_relative_poses,
+    select_memory_idx_fov,
+    get_intrinsics,
+    _interpolate_camera_poses_handedness,
+)
+from ..utils.utils import (
+    get_data,
+    build_plucker_from_c2ws,
+    build_plucker_from_pose,
+    compute_all_poses_from_actions,
+    get_extrinsics,
+)
+from ..utils.conditions import Bench_actions_universal
+from .vae_worker import start_vae_worker_process
 
 def get_current_action():
 
@@ -175,89 +193,10 @@ class MatrixGame3Pipeline:
         else:
             use_int8 = False
         if use_int8:
-            from wan.modules.model import convert_model_to_int8, Int8Linear
-            if self.rank == 0:
-                logging.info("Now quantizing model to Int8...")
-            self.model = convert_model_to_int8(self.model, target_layers=["q", "k", "v", "o"])
-
-            if args is not None and getattr(args, 'verify_quant', False):
-                for m in self.model.modules():
-                    if isinstance(m, Int8Linear):
-                        m.verify_mode = True
-                if self.rank == 0:
-                    logging.info("DEBUG: Quantization verification mode ENABLED.")
-            
-            if dist.is_initialized():
-                if self.rank == 0:
-                    logging.info(f"[Rank {self.rank}] Starting strong Int8 weight synchronization and validation...")
-                for name, m in self.model.named_modules():
-                    if isinstance(m, Int8Linear):
-                        if hasattr(self, 'device'):
-                            m.weight_int8.data = m.weight_int8.data.to(self.device)
-                            m.weight_scales.data = m.weight_scales.data.to(self.device)
-                            if m.bias is not None:
-                                m.bias.data = m.bias.data.to(self.device)
-
-                        dist.broadcast(m.weight_int8.data, src=0)
-                        dist.broadcast(m.weight_scales.data, src=0)
-                        if m.bias is not None:
-                            dist.broadcast(m.bias.data, src=0)
-                        
-                        if getattr(args, 'verify_quant', False):
-                            w_sum_local = m.weight_int8.data.float().sum()
-                            s_sum_local = m.weight_scales.data.sum()
-                            
-                            w_sum_all = w_sum_local.clone()
-                            dist.all_reduce(w_sum_all, op=dist.ReduceOp.SUM)
-
-                            if self.rank == 0:
-                                expected_w = w_sum_local * dist.get_world_size()
-                                if not torch.allclose(w_sum_all, expected_w, atol=1e-2):
-                                    logging.info(f"❌ CRITICAL: Weight sync FAILED for {name}! LocalSum={w_sum_local:.2f}, AllSum={w_sum_all:.2f}")
-
-                                if "blocks.0." in name or "blocks.31." in name:
-                                    logging.info(f"[Rank 0] VALIDATED: Layer {name} | W_Sum: {w_sum_local:.2f} | S_Sum: {s_sum_local:.4f}")
-                dist.barrier()
-                if self.rank == 0:
-                    logging.info(f"[Rank {self.rank}] Strong Int8 weight synchronization complete.")
-            
-            if self.rank == 0:
-                def print_quant_summary():
-                    if hasattr(Int8Linear, '_global_stats'):
-                        stats = Int8Linear._global_stats
-                        k_sims = stats['kernel_sims']
-                        b_sims = stats['bf16_sims']
-                        if k_sims and b_sims:
-                            avg_k = sum(k_sims) / len(k_sims)
-                            avg_b = sum(b_sims) / len(b_sims)
-                            min_k = min(k_sims)
-                            min_b = min(b_sims)
-                            print("\n" + "="*60, flush=True)
-                            print("📊 INT8 QUANTIZATION SUMMARY", flush=True)
-                            print(f"  Total Checks:      {len(k_sims)}", flush=True)
-                            print(f"  Kernel Similarity: Avg={avg_k:.6f}, Min={min_k:.6f}", flush=True)
-                            print(f"  BF16 Similarity:   Avg={avg_b:.6f}, Min={min_b:.6f}", flush=True)
-                            
-                            max_w = stats.get('max_w', 0.0)
-                            max_x = stats.get('max_x', 0.0)
-                            max_out = stats.get('max_out', 0.0)
-                            low_sim_count = stats.get('low_sim_count', 0)
-                            total_checks = len(k_sims)
-                            low_sim_ratio = (low_sim_count / total_checks) * 100 if total_checks > 0 else 0
-                            
-                            print(f"  Max Values:        W={max_w:.2f}, In={max_x:.2f}, Out={max_out:.2f}", flush=True)
-                            print(f"  Low Sim Ratio:     {low_sim_ratio:.2f}% (Sim < 0.99)", flush=True)
-                            
-                            if avg_b > 0.999:
-                                print("  Status:            ✅ EXCELLENT", flush=True)
-                            elif avg_b > 0.99:
-                                print("  Status:            ✅ GOOD", flush=True)
-                            else:
-                                print("  Status:            ⚠️ INVESTIGATE", flush=True)
-                            print("="*60 + "\n", flush=True)
-                atexit.register(print_quant_summary)
-            if self.rank == 0:
-                logging.info("Int8 quantization complete.")
+            raise NotImplementedError(
+                "Int8 quantization for Matrix-Game-3 is not yet wired to base_models/wan_2p2. "
+                "Please run with use_int8=False."
+            )
 
         if dist.is_initialized():
              dist.barrier()
@@ -357,7 +296,10 @@ class MatrixGame3Pipeline:
         if self.rank != 0:
             return
 
-        from wan.modules.attention import FLASH_ATTN_2_AVAILABLE, FLASH_ATTN_3_AVAILABLE
+        from ......base_models.diffusion_model.video.wan_2p1.modules.attention import (
+            FLASH_ATTN_2_AVAILABLE,
+            FLASH_ATTN_3_AVAILABLE,
+        )
 
         requested_fa = getattr(args, 'fa_version', None)
         actual_fa = "None (SDPA)"
