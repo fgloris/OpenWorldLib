@@ -66,11 +66,17 @@ class InfiniteWorldOperator(BaseOperator):
             "camera_down",
             "camera_l",
             "camera_r",
-            "camera_up_l",
-            "camera_up_r",
-            "camera_down_l",
-            "camera_down_r",
+            "camera_ul",
+            "camera_ur",
+            "camera_dl",
+            "camera_dr",
         ]
+        self.interaction_aliases = {
+            "camera_up_l": "camera_ul",
+            "camera_up_r": "camera_ur",
+            "camera_down_l": "camera_dl",
+            "camera_down_r": "camera_dr",
+        }
         self.move_actions = {
             "idle": "no-op",
             "forward": "go forward",
@@ -87,10 +93,10 @@ class InfiniteWorldOperator(BaseOperator):
             "camera_down": "turn down",
             "camera_l": "turn left",
             "camera_r": "turn right",
-            "camera_up_l": "turn up and turn left",
-            "camera_up_r": "turn up and turn right",
-            "camera_down_l": "turn down and turn left",
-            "camera_down_r": "turn down and turn right",
+            "camera_ul": "turn up and turn left",
+            "camera_ur": "turn up and turn right",
+            "camera_dl": "turn down and turn left",
+            "camera_dr": "turn down and turn right",
         }
         self.interaction_template_init()
 
@@ -117,14 +123,15 @@ class InfiniteWorldOperator(BaseOperator):
         move_label = "no-op"
         view_label = "no-op"
         for token in tokens:
-            if token in self.move_actions:
+            canonical_token = self.interaction_aliases.get(token, token)
+            if canonical_token in self.move_actions:
                 if move_label != "no-op":
                     raise ValueError(f"multiple move actions found in '{interaction}'")
-                move_label = self.move_actions[token]
-            elif token in self.view_actions:
+                move_label = self.move_actions[canonical_token]
+            elif canonical_token in self.view_actions:
                 if view_label != "no-op":
                     raise ValueError(f"multiple view actions found in '{interaction}'")
-                view_label = self.view_actions[token]
+                view_label = self.view_actions[canonical_token]
             else:
                 raise ValueError(
                     f"Unsupported interaction token '{token}'. "

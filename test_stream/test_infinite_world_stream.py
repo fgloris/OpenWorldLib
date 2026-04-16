@@ -1,3 +1,5 @@
+import os
+
 from diffusers.utils import export_to_video
 from PIL import Image
 
@@ -7,7 +9,7 @@ from openworldlib.pipelines.infinite_world.pipeline_infinite_world import Infini
 image_path = "./data/test_case/test_image_case1/ref_image.png"
 input_image = Image.open(image_path).convert("RGB")
 
-pretrained_model_path = "/ytech_m2v8_hdd/zengbohan/hf_checkpoints/Infinite-World"
+pretrained_model_path = os.environ.get("INFINITE_WORLD_MODEL_PATH", "MeiGen-AI/Infinite-World")
 
 pipeline = InfiniteWorldPipeline.from_pretrained(
     model_path=pretrained_model_path,

@@ -163,9 +163,12 @@ class InfiniteWorldPipeline:
                     f"stream size mismatch: expected {self.memory_module.target_size}, got {size}"
                 )
 
-        history_frames = self.memory_module.select_frames()
+        current_image = self.memory_module.select()
+        if current_image is None:
+            raise ValueError("No current image in memory. Provide `images` on the first stream() call.")
+
         output_dict = self.process(
-            input_context=history_frames,
+            input_context=current_image,
             interactions=interactions,
             num_output_frames=num_output_frames,
             size=self.memory_module.target_size,

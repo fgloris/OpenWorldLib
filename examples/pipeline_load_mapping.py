@@ -17,12 +17,6 @@ def _resolve_path(model_path: Union[str, Dict], key: str) -> str:
     return model_path
 
 
-def _resolve_optional_path(model_path: Union[str, Dict], key: str):
-    if isinstance(model_path, dict):
-        return model_path.get(key)
-    return None
-
-
 def load_matrix_game2_pipeline(model_path: Union[str, Dict], device: str):
     from openworldlib.pipelines.matrix_game.pipeline_matrix_game_2 import MatrixGame2Pipeline
     return MatrixGame2Pipeline.from_pretrained(
@@ -55,7 +49,7 @@ def load_infinite_world_pipeline(model_path: Union[str, Dict], device: str):
             "tokenizer_path": "tokenizer_path",
         }
         for src_key, dst_key in optional_keys.items():
-            value = _resolve_optional_path(model_path, src_key)
+            value = model_path.get(src_key)
             if value is not None:
                 required_components[dst_key] = value
         if len(required_components) == 0:

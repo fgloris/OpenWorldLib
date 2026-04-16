@@ -350,7 +350,8 @@ class InfiniteWorldSynthesis(BaseSynthesis):
                 width=current_cond.shape[-1],
             )
 
-            start_idx = video_buffer.shape[2] - 1
+            # Action ids describe only the current turn, so advance by emitted frames.
+            start_idx = generated_frames
             move_window = self._slice_action_window(move_ids, start_idx)
             view_window = self._slice_action_window(view_ids, start_idx)
 
