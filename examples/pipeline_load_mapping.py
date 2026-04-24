@@ -42,6 +42,34 @@ def load_hunyuan_game_craft_pipeline(model_path: Union[str, Dict], device: str):
     )
 
 
+def load_infinite_world_pipeline(model_path: Union[str, Dict], device: str):
+    from openworldlib.pipelines.infinite_world.pipeline_infinite_world import InfiniteWorldPipeline
+
+    required_components = None
+    if isinstance(model_path, dict):
+        required_components = {}
+        optional_keys = {
+            "checkpoint_path": "checkpoint_path",
+            "vae_model_path": "vae_model_path",
+            "vae_pth": "vae_pth",
+            "text_encoder_model_path": "text_encoder_model_path",
+            "text_encoder_checkpoint_path": "text_encoder_checkpoint_path",
+            "tokenizer_path": "tokenizer_path",
+        }
+        for src_key, dst_key in optional_keys.items():
+            value = model_path.get(src_key)
+            if value is not None:
+                required_components[dst_key] = value
+        if len(required_components) == 0:
+            required_components = None
+
+    return InfiniteWorldPipeline.from_pretrained(
+        model_path=_resolve_path(model_path, "pretrained_model_path"),
+        required_components=required_components,
+        device=device,
+    )
+
+
 def load_lingbot_world_pipeline(model_path: Union[str, Dict], device: str):
     import os
     from openworldlib.pipelines.lingbot_world.pipeline_lingbot_world import LingBotPipeline
@@ -103,6 +131,7 @@ def load_cosmos_predict2p5_pipeline(model_path: Union[str, Dict], device: str, t
 ## utilize lazy loader to load different tasks pipeline
 video_gen_pipe = {
     "matrix-game2": load_matrix_game2_pipeline,
+    "infinite-world": load_infinite_world_pipeline,
     "matrix-game3": load_matrix_game3_pipeline,
     "matrix-game-3": load_matrix_game3_pipeline,
     "wan2p2": load_wan2p2_pipeline,

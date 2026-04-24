@@ -6,6 +6,7 @@ show_help() {
     echo ""
     echo "Available methods:"
     echo "  - matrix-game-2        : Run test_matrix_game_2.py"
+    echo "  - infinite-world       : Run test_infinite_world.py"
     echo "  - matrix-game-3        : Run test_matrix_game_3.py (uses default HF repo id by default)"
     echo "  - hunyuan-gamecraft    : Run test_hunyuan_gamecraft.py"
     echo "  - hunyuanworld-voyager : Run test_hunyuan_world_voyager.py"
@@ -43,6 +44,10 @@ case $METHOD_NAME in
     "matrix-game-3"|"matrix-game3")
         echo "Executing: matrix_game_3..."
         CUDA_VISIBLE_DEVICES=0 "$PYTHON_BIN" test/test_matrix_game_3.py
+        ;;
+    "infinite-world")
+        echo "Executing: infinite_world..."
+        CUDA_VISIBLE_DEVICES=0 python test/test_infinite_world.py
         ;;
     "hunyuan-gamecraft")
         echo "Executing: hunyuan_gamecraft..."
