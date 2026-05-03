@@ -192,3 +192,19 @@ class MatrixGame3Pipeline:
         if current_image is None:
             raise ValueError("No image in storage. Provide 'images' first.")
         return self.__call__(images=current_image, interactions=interactions, prompt=prompt, **kwargs)
+    
+    def v2v(
+        self,
+        images: List[Image.Image],
+        interactions: List[str],
+        prompt: Optional[str] = None,
+        **kwargs,
+    ) -> str:
+        if self.memory_module is None:
+            raise RuntimeError("MatrixGame3Pipeline.memory_module is not initialized.")
+        if images is not None:
+            self.memory_module.record(images)
+        current_image = self.memory_module.select()
+        if current_image is None:
+            raise ValueError("No image in storage. Provide 'images' first.")
+        return self.__call__(images=current_image, interactions=interactions, prompt=prompt, **kwargs)
