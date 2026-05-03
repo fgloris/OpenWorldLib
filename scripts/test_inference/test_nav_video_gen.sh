@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# --- 环境变量配置 ---
+# 默认使用 0,1,2,3，如果在运行脚本前执行了 export CUDA_VISIBLE_DEVICES=...，则会使用外部设置的值
+export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1,2,3}
+
 # Function to display the help message and available methods
 show_help() {
     echo "Usage: bash scripts/test_inference/test_nav_video_gen.sh [method_name]"
@@ -40,39 +44,39 @@ METHOD_NAME=$1
 case $METHOD_NAME in
     "matrix-game-2")
         echo "Executing: matrix_game_2..."
-        CUDA_VISIBLE_DEVICES=0 "$PYTHON_BIN" test/test_matrix_game_2.py
+        "$PYTHON_BIN" test/test_matrix_game_2.py
         ;;
     "matrix-game-3"|"matrix-game3")
         echo "Executing: matrix_game_3..."
-        CUDA_VISIBLE_DEVICES=0 "$PYTHON_BIN" test/test_matrix_game_3.py
+        "$PYTHON_BIN" test/test_matrix_game_3.py
         ;;
     "infinite-world")
         echo "Executing: infinite_world..."
-        CUDA_VISIBLE_DEVICES=0 python test/test_infinite_world.py
+        "$PYTHON_BIN" test/test_infinite_world.py
         ;;
     "hunyuan-gamecraft")
         echo "Executing: hunyuan_gamecraft..."
-        torchrun --nproc_per_node=1 test/test_hunyuan_gamecraft.py
+        torchrun --nproc_per_node=4 test/test_hunyuan_gamecraft.py
         ;;
     "hunyuanworld-voyager")
         echo "Executing: hunyuan_world_voyager..."
-        CUDA_VISIBLE_DEVICES=0 "$PYTHON_BIN" test/test_hunyuan_world_voyager.py
+        "$PYTHON_BIN" test/test_hunyuan_world_voyager.py
         ;;
     "astra")
         echo "Executing: astra..."
-        CUDA_VISIBLE_DEVICES=0 "$PYTHON_BIN" test/test_astra.py
+        "$PYTHON_BIN" test/test_astra.py
         ;;
     "yume")
         echo "Executing: yume..."
-        CUDA_VISIBLE_DEVICES=0 "$PYTHON_BIN" test/test_yume.py
+        "$PYTHON_BIN" test/test_yume.py
         ;;
     "yume-1p5")
         echo "Executing: yume1.5..."
-        torchrun --nproc_per_node=2 test/test_yume_1p5.py
+        torchrun --nproc_per_node=4 test/test_yume_1p5.py
         ;;
     "lingbot-world")
         echo "Executing: lingbot_world..."
-        torchrun --nproc_per_node=2 test/test_lingbot_world.py
+        torchrun --nproc_per_node=4 test/test_lingbot_world.py
         ;;
     *)
         # If the input does not match any method, show an error message
