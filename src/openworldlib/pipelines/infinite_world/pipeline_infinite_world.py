@@ -192,71 +192,6 @@ class InfiniteWorldPipeline:
         )
         self.memory_module.record(generated_frames)
         return generated_frames
-
-    def v2v(
-        self,
-        video_frames: List[Image.Image],
-        prompt: str = "",
-        interactions: Optional[List[str]] = None,
-        num_frames: Optional[int] = None,
-        size: Optional[Tuple[int, int]] = None,
-        negative_prompt: str = DEFAULT_NEGATIVE_PROMPT,
-        guidance_scale: float = 5.0,
-        num_sampling_steps: Optional[int] = None,
-        seed: Optional[int] = None,
-        progress: bool = True,
-        **kwargs,
-    ):
-        if not isinstance(video_frames, list) or len(video_frames) == 0:
-            raise ValueError("extend_video expects a List[Image.Image].")
-
-        # 清理记忆
-        if self.memory_module.has_frames():
-            self.memory_module.manage(action="reset")
-        
-        # 注入记忆
-        last_frame = video_frames[-1]
-        perception_dict = self.operators.process_perception(last_frame, size=size)
-        
-        # 模拟 memory 填充过程（如果你的 memory 能够存储原始序列）
-        for frame in video_frames:
-            self.memory_module.record(
-                frame, 
-                processed_frames=perception_dict["frames"] if frame == last_frame else None,
-                target_size=perception_dict["size"]
-            )
-
-        # 确定续写的交互逻辑和长度
-        interactions = interactions or ["forward"]
-        num_output_frames = self._resolve_num_frames(interactions, num_frames)
-
-        # 准备生成条件（以视频最后一帧为 Condition）
-        output_dict = self.process(
-            input_context=last_frame,
-            interactions=interactions,
-            num_output_frames=num_output_frames,
-            size=self.memory_module.target_size,
-        )
-
-        # 4. 调用模型预测后续帧
-        generated_frames = self.synthesis_model.predict(
-            cond_video=output_dict["visual_context"]["video"],
-            move_ids=output_dict["operator_condition"]["move_ids"],
-            view_ids=output_dict["operator_condition"]["view_ids"],
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            num_output_frames=num_output_frames,
-            guidance_scale=guidance_scale,
-            num_sampling_steps=num_sampling_steps,
-            seed=seed,
-            progress=progress,
-            **kwargs,
-        )
-
-        # 5. 将生成的帧也记录到内存（方便后续继续迭代调用）
-        self.memory_module.record(generated_frames)
-        
-        return generated_frames
     
     def v2v_2(
         self,
@@ -288,7 +223,7 @@ class InfiniteWorldPipeline:
         
         # 将处理后的视频帧整个记录到 memory_module
         self.memory_module.record(
-            video_frames,
+            perception_dict["frames"],
             processed_frames=perception_dict["frames"], # 这是经过 resize/crop 后的帧
             target_size=perception_dict["size"]
         )
@@ -304,7 +239,7 @@ class InfiniteWorldPipeline:
 
         # 调用模型：核心在于 cond_video 现在是一个包含多帧的 Tensor
         generated_frames = self.synthesis_model.predict(
-            cond_video=perception_dict["video"], # 这里的 video 包含了你输入的完整视频特征
+            cond_video=perception_dict["video"][-1:], # 这里的 video 包含了你输入的完整视频特征
             move_ids=operator_condition["move_ids"],
             view_ids=operator_condition["view_ids"],
             prompt=prompt,

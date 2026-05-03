@@ -51,15 +51,15 @@ input_frames = load_video_to_pil(video_input_path)
 
 # 4. 调用 v2v 接口进行续写
 # 注意：这里传入的是 video_frames 列表，而不是单张 images
-output_video = pipeline.v2v_2(
+output_video = pipeline.v2v(
     video_frames=input_frames,
-    prompt="A serene campus walkway lined with modern glass buildings and soft daylight.",
-    interactions=["forward", "forward+camera_r", "forward", "camera_l"],
+    prompt="A man is talking fast to a women in a kitchen",
+    interactions=["idle", "idle", "idle", "idle"],
     num_frames=80,      # 续写的帧数
     size=(384, 1024),   # 确保分辨率与模型要求一致
 )
 
 # 5. 保存结果
 output_path = "infinite_world_v2v_demo.mp4"
-save_uint8_video(output_video, output_path, fps=30)
+save_uint8_video(pipeline.memory_module.all_frames, output_path, fps=30)
 print(f"Success! Extended video saved to {output_path}")
