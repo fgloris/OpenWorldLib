@@ -25,6 +25,16 @@ class MatrixGame3Memory(BaseMemory):
                     "metadata": {},
                 }
             )
+        elif isinstance(data, list):
+            for image in data:
+                self.storage.append(
+                    {
+                        "content": image,
+                        "type": "image",
+                        "timestamp": len(self.storage),
+                        "metadata": {},
+                    }
+                )
 
     def select(self, **kwargs) -> Optional[Image.Image]:
         if not self.storage:

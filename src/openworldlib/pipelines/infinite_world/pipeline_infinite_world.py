@@ -193,7 +193,7 @@ class InfiniteWorldPipeline:
         self.memory_module.record(generated_frames)
         return generated_frames
     
-    def v2v_2(
+    def v2v(
         self,
         video_frames: List[Image.Image],
         prompt: str = "",
