@@ -387,39 +387,165 @@ class MatrixGame3Synthesis(BaseSynthesis):
         if reset_memory:
             self.reset_video_memory()
 
-        # Keep a lightweight cross-call memory: if available, continue from the last
-        # frame of previous video; otherwise start from the first frame of current video.
-        condition_image = self._v2v_memory_image if self._v2v_memory_image is not None else images[0]
+        out_dir = Path(output_dir or (Path.cwd() / "output" / "matrix_game_3"))
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-        result = self.predict(
-            image=condition_image,
-            prompt=prompt,
-            interactions=interactions,
-            operator_condition=operator_condition,
-            output_dir=output_dir,
-            save_name=save_name,
-            size=size,
-            num_iterations=num_iterations,
-            num_inference_steps=num_inference_steps,
-            seed=seed,
-            sample_shift=sample_shift,
-            sample_guide_scale=sample_guide_scale,
-            fa_version=fa_version,
-            use_int8=use_int8,
-            verify_quant=verify_quant,
-            use_async_vae=use_async_vae,
-            async_vae_warmup_iters=async_vae_warmup_iters,
-            compile_vae=compile_vae,
-            lightvae_pruning_rate=lightvae_pruning_rate,
-            vae_type=vae_type,
-            use_base_model=use_base_model,
-            save_video=save_video,
-            return_result=True,
-            visualize_warning=visualize_warning,
-            **kwargs,
-        )
+        args = getattr(self.pipeline, "args", None)
+        if args is None:
+            args = SimpleNamespace()
+            self.pipeline.args = args
 
-        video_tensor = result.get("video_tensor")
+        args.output_dir = str(out_dir)
+        args.ckpt_dir = str(self.checkpoint_dir)
+        args.size = str(size)
+        args.save_name = str(save_name)
+        args.num_iterations = int(num_iterations)
+        args.use_async_vae = bool(use_async_vae)
+        args.async_vae_warmup_iters = int(async_vae_warmup_iters)
+        args.compile_vae = bool(compile_vae)
+        args.lightvae_pruning_rate = lightvae_pruning_rate
+        args.vae_type = str(vae_type)
+        args.use_int8 = bool(use_int8)
+        args.verify_quant = bool(verify_quant)
+        args.visualize_warning = bool(visualize_warning)
+        self.pipeline.fa_version = str(fa_version)
+
+        try:
+            h_str, w_str = str(size).split("*")
+            max_area = int(h_str) * int(w_str)
+        except Exception:
+            max_area = 704 * 1280
+
+        restore_get_data = None
+        mg3_utils = getattr(self.pipeline, "_mg3_utils_module", None)
+        if mg3_utils is not None:
+            original_get_data = mg3_utils.get_data
+            keyboard = None
+            mouse = None
+            if operator_condition is not None:
+                keyboard = operator_condition.get("keyboard_condition")
+                mouse = operator_condition.get("mouse_condition")
+            if keyboard is not None and not isinstance(keyboard, torch.Tensor):
+                keyboard = torch.tensor(keyboard, dtype=torch.float32)
+            if mouse is not None and not isinstance(mouse, torch.Tensor):
+                mouse = torch.tensor(mouse, dtype=torch.float32)
+            if keyboard is not None:
+                keyboard = keyboard.to(dtype=torch.float32)
+            if mouse is not None:
+                mouse = mouse.to(dtype=torch.float32)
+
+            def _patched_get_data(num_frames, height, width, pil_image, device=None, dtype=None):
+                # `pil_image` is ignored in video mode: we condition on the full input video.
+                frame_tensors = []
+                for frm in images:
+                    x = torch.from_numpy(np.array(frm)).unsqueeze(0).permute(0, 3, 1, 2)
+                    frame_tensors.append(x)
+                input_video = torch.stack(frame_tensors, dim=2)  # 1, 3, T, H, W
+
+                def normalize_to_neg_one_to_one(x):
+                    return 2.0 * x - 1.0
+
+                transform = mg3_utils.get_video_transform(height, width, normalize_to_neg_one_to_one)
+                input_video = transform(input_video)
+
+                if keyboard is not None and mouse is not None:
+                    if keyboard.shape[0] >= num_frames:
+                        kb = keyboard[:num_frames]
+                        ms = mouse[:num_frames]
+                    else:
+                        pad = num_frames - keyboard.shape[0]
+                        kb = torch.cat([keyboard, keyboard[-1:].repeat(pad, 1)], dim=0)
+                        ms = torch.cat([mouse, mouse[-1:].repeat(pad, 1)], dim=0)
+                else:
+                    actions = mg3_utils.Bench_actions_universal(num_frames)
+                    kb = actions["keyboard_condition"]
+                    ms = actions["mouse_condition"]
+
+                first_pose = np.concatenate([np.zeros(3), np.zeros(2)], axis=0)
+                all_poses = mg3_utils.compute_all_poses_from_actions(kb, ms, first_pose=first_pose)
+                positions = all_poses[:, :3].tolist()
+                rotations = np.concatenate(
+                    [np.zeros((all_poses.shape[0], 1)), all_poses[:, 3:5]],
+                    axis=1,
+                ).tolist()
+                extrinsics_all = mg3_utils.get_extrinsics(rotations, positions)
+
+                return (
+                    input_video.to(device, dtype),
+                    extrinsics_all,
+                    kb.to(device, dtype).unsqueeze(0),
+                    ms.to(device, dtype).unsqueeze(0),
+                )
+
+            mg3_utils.get_data = _patched_get_data
+            inf_mod = sys.modules.get(self.pipeline.__class__.__module__)
+            if inf_mod is not None:
+                inf_mod.get_data = _patched_get_data
+
+            def _restore():
+                mg3_utils.get_data = original_get_data
+                if inf_mod is not None:
+                    inf_mod.get_data = original_get_data
+
+            restore_get_data = _restore
+
+        try:
+            result: Dict[str, Any] = self.pipeline.generate(
+                prompt,
+                images[0],
+                max_area=max_area,
+                shift=float(sample_shift) if sample_shift is not None else 5.0,
+                num_inference_steps=int(num_inference_steps),
+                guide_scale=float(sample_guide_scale) if sample_guide_scale is not None else 5.0,
+                seed=int(seed),
+                use_base_model=bool(use_base_model),
+                args=args,
+            )
+        finally:
+            if restore_get_data is not None:
+                restore_get_data()
+
+        video_tensor = result.get("video")
+        if video_tensor is None:
+            raise RuntimeError("Matrix-Game-3 did not return `video` tensor.")
+
+        keyboard_condition = result.get("keyboard_condition")
+        mouse_condition = result.get("mouse_condition")
+        frame_res = result.get("frame_res", (704, 1280))
+
+        video_path = str(out_dir / f"{save_name}.mp4")
+        if save_video:
+            video_np = np.ascontiguousarray(
+                ((rearrange(video_tensor, "C T H W -> T H W C").float() + 1) * 127.5)
+                .clip(0, 255)
+                .detach()
+                .cpu()
+                .numpy()
+                .astype(np.uint8)
+            )
+            mouse_icon = Path(self.code_dir) / "assets" / "images" / "mouse.png"
+            if keyboard_condition is not None and mouse_condition is not None and mouse_icon.exists():
+                process_video(
+                    video_np,
+                    video_path,
+                    (
+                        keyboard_condition.float().cpu().numpy(),
+                        mouse_condition.float().cpu().numpy(),
+                    ),
+                    str(mouse_icon),
+                    mouse_scale=0.2,
+                    default_frame_res=tuple(frame_res),
+                )
+            else:
+                export_to_video([frame / 255.0 for frame in video_np], video_path, fps=17)
+
+        payload = {
+            "video_tensor": video_tensor,
+            "video_path": video_path if save_video else None,
+            "keyboard_condition": keyboard_condition,
+            "mouse_condition": mouse_condition,
+        }
+
         if isinstance(video_tensor, torch.Tensor) and video_tensor.ndim == 4 and video_tensor.shape[1] > 0:
             last_frame = video_tensor[:, -1:, :, :].detach().cpu()
             frame_np = np.ascontiguousarray(
@@ -433,5 +559,5 @@ class MatrixGame3Synthesis(BaseSynthesis):
             self._v2v_memory_image = images[-1]
 
         if return_result:
-            return result
-        return result.get("video_path")
+            return payload
+        return payload.get("video_path")

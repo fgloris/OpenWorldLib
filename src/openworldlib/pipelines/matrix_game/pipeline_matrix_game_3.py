@@ -58,9 +58,8 @@ class MatrixGame3Pipeline:
             device=device,
         )
 
-    def process(self, input_images, interactions: Optional[List[str]] = None) -> dict:
-        # MG3 clip-level default: first clip has 57 frames.
-        interaction_payload = self.operators.process_interaction(interactions or [], num_frames=57)
+    def process(self, input_images, interactions: Optional[List[str]] = None, num_frames: int = 57) -> dict:
+        interaction_payload = self.operators.process_interaction(interactions or [], num_frames=num_frames)
         return {
             "image": input_images,
             **interaction_payload,
@@ -113,12 +112,12 @@ class MatrixGame3Pipeline:
             logging.getLogger("torch._inductor.autotune_process").setLevel(logging.WARNING)
             logging.getLogger("torch._inductor").setLevel(logging.WARNING)
 
-        processed_inputs = self.process(images, interactions=interactions)
+        processed_inputs = self.process(images, interactions=interactions, num_frames=57)
 
         prompt_text = prompt or "A first-person view interactive scene."
         need_payload = return_result or (video_save_path is not None)
-        prediction: Any = self.synthesis_model.predict_from_video(
-            images=processed_inputs["image"],
+        prediction: Any = self.synthesis_model.predict(
+            image=processed_inputs["image"],
             prompt=prompt_text,
             interactions=interactions,
             operator_condition=processed_inputs,
@@ -240,12 +239,12 @@ class MatrixGame3Pipeline:
             logging.getLogger("torch._inductor.autotune_process").setLevel(logging.WARNING)
             logging.getLogger("torch._inductor").setLevel(logging.WARNING)
 
-        processed_inputs = self.process(images, interactions=interactions)
+        processed_inputs = self.process(images, interactions=interactions, num_frames=max(1, len(images)))
 
         prompt_text = prompt or "A first-person view interactive scene."
         need_payload = return_result or (video_save_path is not None)
-        prediction: Any = self.synthesis_model.predict(
-            image=processed_inputs["image"],
+        prediction: Any = self.synthesis_model.predict_from_video(
+            images=processed_inputs["image"],
             prompt=prompt_text,
             interactions=interactions,
             operator_condition=processed_inputs,
