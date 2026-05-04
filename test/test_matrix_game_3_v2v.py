@@ -28,7 +28,7 @@ def main():
     # Keep test style close to MatrixGame2: a default pretrained model id.
     pretrained_model_path = "Skywork/Matrix-Game-3.0"
 
-    images = load_video_to_pil("./data/test_case/test_video_case1/talking_man.mp4")
+    images = load_video_to_pil("./data/test_case/test_video_case1/origin-1.mp4")[:240]
 
     pipeline = MatrixGame3Pipeline.from_pretrained(model_path=pretrained_model_path, device="cuda")
 
@@ -46,7 +46,7 @@ def main():
         output_dir="./output",
         save_name=case["save_name"],
         size="704*1280",
-        num_iterations=2,
+        num_iterations=8,
         num_inference_steps=3,
         fa_version="0",
         save_video=False,

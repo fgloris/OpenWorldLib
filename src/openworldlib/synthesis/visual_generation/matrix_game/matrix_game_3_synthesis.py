@@ -489,15 +489,17 @@ class MatrixGame3Synthesis(BaseSynthesis):
             # Encode full condition video into latent history for AR prefill memory.
             h_str, w_str = str(size).split("*")
             h_val, w_val = int(h_str), int(w_str)
+            required_frames = 57 + max(0, int(num_iterations) - 1) * 40
+            selected_frames = images[-required_frames:] if len(images) > required_frames else images
             frame_tensors = []
-            for frm in images:
-                x = torch.from_numpy(np.array(frm)).unsqueeze(0).permute(0, 3, 1, 2)
+            for frm in selected_frames:
+                x = torch.from_numpy(np.array(frm)).permute(2, 0, 1)  # C, H, W
                 frame_tensors.append(x)
-            input_video = torch.stack(frame_tensors, dim=2)  # 1, 3, T, H, W
+            input_video = torch.stack(frame_tensors, dim=0)  # T, C, H, W
             transform = mg3_utils.get_video_transform(h_val, w_val, lambda z: 2.0 * z - 1.0)
             input_video = transform(input_video)
             with torch.no_grad():
-                video_latents = self.pipeline.vae.encode([input_video[0].to(self.pipeline.device, dtype=torch.bfloat16)])[0]
+                video_latents = self.pipeline.vae.encode([input_video.transpose(0, 1).to(self.pipeline.device, dtype=torch.bfloat16)])[0]
             # Need enough latent history for memory index lookup on first generated clip.
             min_prefill_t = 16
             if video_latents.shape[1] < min_prefill_t:
