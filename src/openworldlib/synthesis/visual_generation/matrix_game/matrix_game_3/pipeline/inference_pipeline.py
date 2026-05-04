@@ -364,6 +364,12 @@ class MatrixGame3Pipeline:
         if dist.is_initialized():
             dist.broadcast(img_cond, src=0)
 
+        prefill_latents = getattr(args, "prefill_latents", None) if args is not None else None
+        has_prefill = isinstance(prefill_latents, torch.Tensor) and prefill_latents.ndim == 5 and prefill_latents.shape[2] > 0
+        if has_prefill:
+            prefill_latents = prefill_latents.to(device=self.device, dtype=weight_dtype).contiguous()
+            img_cond = prefill_latents[:, :, -4:]
+
         max_lat_f = (first_clip_frame - 1) // self.vae_stride[0] + 1
         max_mem_f = 5
         max_total_f = max_lat_f + max_mem_f
@@ -374,11 +380,11 @@ class MatrixGame3Pipeline:
 
         with torch.no_grad():
             total_frames = 0
-            all_latents_list = []
+            all_latents_list = [prefill_latents] if has_prefill else []
             all_videos_list = []
 
             for clip_idx in range(num_iterations):
-                first_clip = (clip_idx == 0)
+                first_clip = (clip_idx == 0) and (not has_prefill)
                 if self.rank == 0 and getattr(args, "visualize_warning", False):
                     print(f" Iteration {clip_idx + 1}/{num_iterations}", flush=True)
 

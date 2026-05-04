@@ -417,6 +417,7 @@ class MatrixGame3Synthesis(BaseSynthesis):
             max_area = 704 * 1280
 
         restore_get_data = None
+        args.prefill_latents = None
         mg3_utils = getattr(self.pipeline, "_mg3_utils_module", None)
         if mg3_utils is not None:
             original_get_data = mg3_utils.get_data
@@ -435,18 +436,14 @@ class MatrixGame3Synthesis(BaseSynthesis):
                 mouse = mouse.to(dtype=torch.float32)
 
             def _patched_get_data(num_frames, height, width, pil_image, device=None, dtype=None):
-                # `pil_image` is ignored in video mode: we condition on the full input video.
-                frame_tensors = []
-                for frm in images:
-                    x = torch.from_numpy(np.array(frm)).unsqueeze(0).permute(0, 3, 1, 2)
-                    frame_tensors.append(x)
-                input_video = torch.stack(frame_tensors, dim=2)  # 1, 3, T, H, W
-
+                # Keep one-frame anchor for AR loop; history video is injected via prefill latents.
+                input_image = torch.from_numpy(np.array(images[0])).unsqueeze(0).permute(0, 3, 1, 2)
                 def normalize_to_neg_one_to_one(x):
                     return 2.0 * x - 1.0
 
                 transform = mg3_utils.get_video_transform(height, width, normalize_to_neg_one_to_one)
-                input_video = transform(input_video)
+                input_image = transform(input_image)
+                input_image = input_image.transpose(0, 1).unsqueeze(0)
 
                 if keyboard is not None and mouse is not None:
                     if keyboard.shape[0] >= num_frames:
@@ -471,7 +468,7 @@ class MatrixGame3Synthesis(BaseSynthesis):
                 extrinsics_all = mg3_utils.get_extrinsics(rotations, positions)
 
                 return (
-                    input_video.to(device, dtype),
+                    input_image.to(device, dtype),
                     extrinsics_all,
                     kb.to(device, dtype).unsqueeze(0),
                     ms.to(device, dtype).unsqueeze(0),
@@ -489,6 +486,25 @@ class MatrixGame3Synthesis(BaseSynthesis):
 
             restore_get_data = _restore
 
+            # Encode full condition video into latent history for AR prefill memory.
+            h_str, w_str = str(size).split("*")
+            h_val, w_val = int(h_str), int(w_str)
+            frame_tensors = []
+            for frm in images:
+                x = torch.from_numpy(np.array(frm)).unsqueeze(0).permute(0, 3, 1, 2)
+                frame_tensors.append(x)
+            input_video = torch.stack(frame_tensors, dim=2)  # 1, 3, T, H, W
+            transform = mg3_utils.get_video_transform(h_val, w_val, lambda z: 2.0 * z - 1.0)
+            input_video = transform(input_video)
+            with torch.no_grad():
+                video_latents = self.pipeline.vae.encode([input_video[0].to(self.pipeline.device, dtype=torch.bfloat16)])[0]
+            # Need enough latent history for memory index lookup on first generated clip.
+            min_prefill_t = 16
+            if video_latents.shape[1] < min_prefill_t:
+                pad = min_prefill_t - video_latents.shape[1]
+                video_latents = torch.cat([video_latents, video_latents[:, -1:].repeat(1, pad, 1, 1)], dim=1)
+            args.prefill_latents = video_latents.unsqueeze(0).detach().cpu()
+
         try:
             result: Dict[str, Any] = self.pipeline.generate(
                 prompt,
@@ -504,6 +520,7 @@ class MatrixGame3Synthesis(BaseSynthesis):
         finally:
             if restore_get_data is not None:
                 restore_get_data()
+            args.prefill_latents = None
 
         video_tensor = result.get("video")
         if video_tensor is None:

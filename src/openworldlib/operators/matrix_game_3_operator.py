@@ -19,6 +19,8 @@ class MatrixGame3Operator(BaseOperator):
             "back",
             "left",
             "right",
+            "camera_u",
+            "camera_d",
             "camera_l",
             "camera_r",
             "forward_left",
@@ -57,6 +59,8 @@ class MatrixGame3Operator(BaseOperator):
             "back_right": ["back", "right"],
         }
         cam_map = {
+            "camera_u": [0.1, 0.0],
+            "camera_d": [-0.1, 0.0],
             "camera_l": [0.0, -0.1],
             "camera_r": [0.0, 0.1],
         }
