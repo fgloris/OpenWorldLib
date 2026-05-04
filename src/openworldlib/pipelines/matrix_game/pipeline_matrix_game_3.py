@@ -195,44 +195,46 @@ class MatrixGame3Pipeline:
     
     def v2v(
         self,
-        images: Image.Image,
+        images: Union[Image.Image, List[Image.Image]],
         interactions: Optional[List[str]] = None,
         prompt: Optional[str] = None,
         output_dir: Optional[str] = None,
-        save_name: str = "matrix_game_3_demo",
+        save_name: str = "matrix_game_3_v2v",
         size: str = "704*1280",
-        num_iterations: int = 12,
+        num_iterations: int = 1,
         num_inference_steps: int = 3,
         seed: int = 42,
         sample_shift: Optional[float] = None,
         sample_guide_scale: Optional[float] = None,
         fa_version: str = "0",
-        use_int8: bool = False,
-        verify_quant: bool = False,
-        use_async_vae: bool = False,
-        async_vae_warmup_iters: int = 0,
-        compile_vae: bool = False,
-        lightvae_pruning_rate: Optional[float] = None,
-        vae_type: str = "mg_lightvae_v2",
         use_base_model: bool = False,
         save_video: bool = True,
         return_result: bool = False,
         video_save_path: Optional[Union[str, Path]] = None,
         visualize_warning: bool = False,
         **kwargs,
-    ) -> str:
-        if self.memory_module is None:
-            raise RuntimeError("MatrixGame3Pipeline.memory_module is not initialized.")
-        if images is not None:
-            self.memory_module.record(images)
-        current_image = self.memory_module.select()
-        if current_image is None:
-            raise ValueError("No image in storage. Provide 'images' first.")
-    
-        if not isinstance(images, list):
-            raise ValueError("MatrixGame3Pipeline expects `images` to be a PIL.Image.")
+    ) -> Any:
         if self.synthesis_model is None:
-            raise RuntimeError("MatrixGame3Pipeline.synthesis_model is not initialized.")
+            raise RuntimeError(
+                "MatrixGame3Pipeline.synthesis_model is not initialized.")
+        if self.memory_module is None:
+            raise RuntimeError(
+                "MatrixGame3Pipeline.memory_module is not initialized.")
+
+        if isinstance(images, list):
+            cond_image = images[0] if len(images) > 0 else None
+            if cond_image is None:
+                raise ValueError(
+                    "v2v received an empty video frame list.")
+        elif isinstance(images, Image.Image):
+            cond_image = images
+        else:
+            raise ValueError(
+                "v2v expects `images` to be a PIL.Image or a list of "
+                "PIL.Image (video frames).")
+
+        self.memory_module.record(cond_image)
+
         if not visualize_warning:
             warnings.filterwarnings(
                 "ignore",
@@ -245,52 +247,83 @@ class MatrixGame3Pipeline:
                 category=FutureWarning,
             )
             logging.getLogger("torch._dynamo").setLevel(logging.ERROR)
-            logging.getLogger("torch._inductor.autotune_process").setLevel(logging.WARNING)
+            logging.getLogger("torch._inductor.autotune_process").setLevel(
+                logging.WARNING)
             logging.getLogger("torch._inductor").setLevel(logging.WARNING)
-
-        processed_inputs = self.process(images, interactions=interactions)
 
         prompt_text = prompt or "A first-person view interactive scene."
         need_payload = return_result or (video_save_path is not None)
-        prediction: Any = self.synthesis_model.predict(
-            image=processed_inputs["image"],
-            prompt=prompt_text,
-            interactions=interactions,
-            operator_condition=processed_inputs,
-            output_dir=output_dir,
-            save_name=save_name,
-            size=size,
-            num_iterations=num_iterations,
-            num_inference_steps=num_inference_steps,
-            seed=seed,
-            sample_shift=sample_shift,
-            sample_guide_scale=sample_guide_scale,
-            fa_version=fa_version,
-            use_int8=use_int8,
-            verify_quant=verify_quant,
-            use_async_vae=use_async_vae,
-            async_vae_warmup_iters=async_vae_warmup_iters,
-            compile_vae=compile_vae,
-            lightvae_pruning_rate=lightvae_pruning_rate,
-            vae_type=vae_type,
-            use_base_model=use_base_model,
-            save_video=save_video,
-            return_result=need_payload,
-            visualize_warning=visualize_warning,
-            **kwargs,
-        )
 
-        if video_save_path is not None:
-            if not isinstance(prediction, dict):
-                raise RuntimeError("Expected payload dict when `video_save_path` is set.")
-            video_tensor = prediction.get("video_tensor")
-            if video_tensor is None:
-                raise RuntimeError("Pipeline did not return `video_tensor`; cannot save to custom path.")
+        all_video_tensors = []
+        last_keyboard_condition = None
+        last_mouse_condition = None
+        last_frame_res = (704, 1280)
+
+        for clip_i in range(num_iterations):
+            is_continuation = self.memory_module.has_continuation_state()
+            num_frames = 40 if is_continuation else 57
+
+            interaction_payload = self.operators.process_interaction(
+                interactions or [], num_frames=num_frames)
+            operator_condition = {"image": cond_image, **interaction_payload}
+
+            clip_state = (
+                self.memory_module.get_clip_state()
+                if is_continuation else None)
+
+            prediction: Any = self.synthesis_model.predict_clip(
+                image=cond_image,
+                prompt=prompt_text,
+                interactions=interactions,
+                operator_condition=operator_condition,
+                clip_state=clip_state,
+                output_dir=output_dir,
+                save_name=f"{save_name}_clip{clip_i}",
+                size=size,
+                num_inference_steps=num_inference_steps,
+                seed=seed,
+                sample_shift=sample_shift,
+                sample_guide_scale=sample_guide_scale,
+                fa_version=fa_version,
+                use_base_model=use_base_model,
+                save_video=save_video,
+                return_result=True,
+                visualize_warning=visualize_warning,
+                **kwargs,
+            )
+
+            new_clip_state = prediction.get("clip_state")
+            if new_clip_state is not None:
+                self.memory_module.set_clip_state(new_clip_state)
+
+            vt = prediction.get("video_tensor")
+            if vt is not None:
+                all_video_tensors.append(vt)
+            last_keyboard_condition = prediction.get("keyboard_condition")
+            last_mouse_condition = prediction.get("mouse_condition")
+            last_frame_res = prediction.get("frame_res", (704, 1280))
+
+        if len(all_video_tensors) > 1:
+            video_tensor = torch.cat(all_video_tensors, dim=0)
+        elif len(all_video_tensors) == 1:
+            video_tensor = all_video_tensors[0]
+        else:
+            video_tensor = None
+
+        payload = {
+            "video_tensor": video_tensor,
+            "video_path": None,
+            "keyboard_condition": last_keyboard_condition,
+            "mouse_condition": last_mouse_condition,
+            "frame_res": last_frame_res,
+        }
+
+        if video_save_path is not None and video_tensor is not None:
             saved_path = self.save_video_tensor(video_tensor, video_save_path)
-            prediction["video_path"] = saved_path
+            payload["video_path"] = saved_path
 
         if return_result:
-            return prediction
+            return payload
         if video_save_path is not None:
             return str(Path(video_save_path))
-        return prediction
+        return payload

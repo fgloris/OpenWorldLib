@@ -156,34 +156,12 @@ class MatrixGame3Synthesis(BaseSynthesis):
 
         return cls(pipeline=pipeline, checkpoint_dir=model_root, code_dir=code_dir, device=device)
 
-    def predict(
-        self,
-        image: Image.Image,
-        prompt: str,
-        interactions: Optional[List[str]] = None,
-        operator_condition: Optional[Dict[str, Any]] = None,
-        output_dir: Optional[str] = None,
-        save_name: str = "matrix_game_3_demo",
-        size: str = "704*1280",
-        num_iterations: int = 12,
-        num_inference_steps: int = 3,
-        seed: int = 42,
-        sample_shift: Optional[float] = None,
-        sample_guide_scale: Optional[float] = None,
-        fa_version: str = "0",
-        use_int8: bool = False,
-        verify_quant: bool = False,
-        use_async_vae: bool = False,
-        async_vae_warmup_iters: int = 0,
-        compile_vae: bool = False,
-        lightvae_pruning_rate: Optional[float] = None,
-        vae_type: str = "mg_lightvae_v2",
-        use_base_model: bool = False,
-        save_video: bool = True,
-        return_result: bool = False,
-        visualize_warning: bool = False,
-        **kwargs,
-    ) -> Any:
+    def _setup_args(self, output_dir, save_name, size, num_iterations=12,
+                    num_inference_steps=3, seed=42, fa_version="0",
+                    use_async_vae=False, async_vae_warmup_iters=0,
+                    compile_vae=False, lightvae_pruning_rate=None,
+                    vae_type="mg_lightvae_v2", use_int8=False,
+                    verify_quant=False, visualize_warning=False):
         out_dir = Path(output_dir or (Path.cwd() / "output" / "matrix_game_3"))
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -219,6 +197,127 @@ class MatrixGame3Synthesis(BaseSynthesis):
         except Exception:
             max_area = 704 * 1280
 
+        return out_dir, args, max_area
+
+    def _save_video(self, video_tensor, keyboard_condition, mouse_condition,
+                    frame_res, out_dir, save_name, save_video):
+        video_path = str(out_dir / f"{save_name}.mp4")
+        if save_video:
+            video_np = np.ascontiguousarray(
+                ((rearrange(video_tensor, "C T H W -> T H W C").float() + 1) * 127.5)
+                .clip(0, 255)
+                .detach()
+                .cpu()
+                .numpy()
+                .astype(np.uint8)
+            )
+            mouse_icon = Path(self.code_dir) / "assets" / "images" / "mouse.png"
+            if keyboard_condition is not None and mouse_condition is not None and mouse_icon.exists():
+                process_video(
+                    video_np,
+                    video_path,
+                    (
+                        keyboard_condition.float().cpu().numpy(),
+                        mouse_condition.float().cpu().numpy(),
+                    ),
+                    str(mouse_icon),
+                    mouse_scale=0.2,
+                    default_frame_res=tuple(frame_res),
+                )
+            else:
+                export_to_video([frame / 255.0 for frame in video_np], video_path, fps=17)
+        return video_path
+
+    def _patch_get_data(self, keyboard, mouse):
+        mg3_utils = getattr(self.pipeline, "_mg3_utils_module", None)
+        if mg3_utils is None:
+            return None
+
+        original_get_data = mg3_utils.get_data
+
+        def _patched_get_data(num_frames, height, width, pil_image, device=None, dtype=None):
+            input_image = torch.from_numpy(np.array(pil_image)).unsqueeze(0)
+            input_image = input_image.permute(0, 3, 1, 2)
+
+            def normalize_to_neg_one_to_one(x):
+                return 2.0 * x - 1.0
+
+            transform = mg3_utils.get_video_transform(height, width, normalize_to_neg_one_to_one)
+            input_image = transform(input_image)
+            input_image = input_image.transpose(0, 1).unsqueeze(0)
+
+            if keyboard.shape[0] >= num_frames:
+                kb = keyboard[:num_frames]
+                ms = mouse[:num_frames]
+            else:
+                pad = num_frames - keyboard.shape[0]
+                kb_pad = keyboard[-1:].repeat(pad, 1)
+                ms_pad = mouse[-1:].repeat(pad, 1)
+                kb = torch.cat([keyboard, kb_pad], dim=0)
+                ms = torch.cat([mouse, ms_pad], dim=0)
+
+            first_pose = np.concatenate([np.zeros(3), np.zeros(2)], axis=0)
+            all_poses = mg3_utils.compute_all_poses_from_actions(kb, ms, first_pose=first_pose)
+            positions = all_poses[:, :3].tolist()
+            rotations = np.concatenate(
+                [np.zeros((all_poses.shape[0], 1)), all_poses[:, 3:5]],
+                axis=1,
+            ).tolist()
+            extrinsics_all = mg3_utils.get_extrinsics(rotations, positions)
+            return (
+                input_image.to(device, dtype),
+                extrinsics_all,
+                kb.to(device, dtype).unsqueeze(0),
+                ms.to(device, dtype).unsqueeze(0),
+            )
+
+        mg3_utils.get_data = _patched_get_data
+        inf_mod = sys.modules.get(self.pipeline.__class__.__module__)
+        if inf_mod is not None:
+            inf_mod.get_data = _patched_get_data
+
+        def _restore():
+            mg3_utils.get_data = original_get_data
+            if inf_mod is not None:
+                inf_mod.get_data = original_get_data
+
+        return _restore
+
+    def predict(
+        self,
+        image: Image.Image,
+        prompt: str,
+        interactions: Optional[List[str]] = None,
+        operator_condition: Optional[Dict[str, Any]] = None,
+        output_dir: Optional[str] = None,
+        save_name: str = "matrix_game_3_demo",
+        size: str = "704*1280",
+        num_iterations: int = 12,
+        num_inference_steps: int = 3,
+        seed: int = 42,
+        sample_shift: Optional[float] = None,
+        sample_guide_scale: Optional[float] = None,
+        fa_version: str = "0",
+        use_int8: bool = False,
+        verify_quant: bool = False,
+        use_async_vae: bool = False,
+        async_vae_warmup_iters: int = 0,
+        compile_vae: bool = False,
+        lightvae_pruning_rate: Optional[float] = None,
+        vae_type: str = "mg_lightvae_v2",
+        use_base_model: bool = False,
+        save_video: bool = True,
+        return_result: bool = False,
+        visualize_warning: bool = False,
+        **kwargs,
+    ) -> Any:
+        out_dir, args, max_area = self._setup_args(
+            output_dir, save_name, size, num_iterations,
+            num_inference_steps, seed, fa_version,
+            use_async_vae, async_vae_warmup_iters,
+            compile_vae, lightvae_pruning_rate,
+            vae_type, use_int8, verify_quant, visualize_warning)
+
         restore_get_data = None
         if operator_condition is not None:
             keyboard = operator_condition.get("keyboard_condition")
@@ -228,61 +327,9 @@ class MatrixGame3Synthesis(BaseSynthesis):
                     keyboard = torch.tensor(keyboard, dtype=torch.float32)
                 if not isinstance(mouse, torch.Tensor):
                     mouse = torch.tensor(mouse, dtype=torch.float32)
-
                 keyboard = keyboard.to(dtype=torch.float32)
                 mouse = mouse.to(dtype=torch.float32)
-
-                mg3_utils = getattr(self.pipeline, "_mg3_utils_module", None)
-                if mg3_utils is not None:
-                    original_get_data = mg3_utils.get_data
-
-                    def _patched_get_data(num_frames, height, width, pil_image, device=None, dtype=None):
-                        input_image = torch.from_numpy(np.array(pil_image)).unsqueeze(0)
-                        input_image = input_image.permute(0, 3, 1, 2)
-
-                        def normalize_to_neg_one_to_one(x):
-                            return 2.0 * x - 1.0
-
-                        transform = mg3_utils.get_video_transform(height, width, normalize_to_neg_one_to_one)
-                        input_image = transform(input_image)
-                        input_image = input_image.transpose(0, 1).unsqueeze(0)
-
-                        if keyboard.shape[0] >= num_frames:
-                            kb = keyboard[:num_frames]
-                            ms = mouse[:num_frames]
-                        else:
-                            pad = num_frames - keyboard.shape[0]
-                            kb_pad = keyboard[-1:].repeat(pad, 1)
-                            ms_pad = mouse[-1:].repeat(pad, 1)
-                            kb = torch.cat([keyboard, kb_pad], dim=0)
-                            ms = torch.cat([mouse, ms_pad], dim=0)
-
-                        first_pose = np.concatenate([np.zeros(3), np.zeros(2)], axis=0)
-                        all_poses = mg3_utils.compute_all_poses_from_actions(kb, ms, first_pose=first_pose)
-                        positions = all_poses[:, :3].tolist()
-                        rotations = np.concatenate(
-                            [np.zeros((all_poses.shape[0], 1)), all_poses[:, 3:5]],
-                            axis=1,
-                        ).tolist()
-                        extrinsics_all = mg3_utils.get_extrinsics(rotations, positions)
-                        return (
-                            input_image.to(device, dtype),
-                            extrinsics_all,
-                            kb.to(device, dtype).unsqueeze(0),
-                            ms.to(device, dtype).unsqueeze(0),
-                        )
-
-                    mg3_utils.get_data = _patched_get_data
-                    inf_mod = sys.modules.get(self.pipeline.__class__.__module__)
-                    if inf_mod is not None:
-                        inf_mod.get_data = _patched_get_data
-
-                    def _restore():
-                        mg3_utils.get_data = original_get_data
-                        if inf_mod is not None:
-                            inf_mod.get_data = original_get_data
-
-                    restore_get_data = _restore
+                restore_get_data = self._patch_get_data(keyboard, mouse)
 
         try:
             result: Dict[str, Any] = self.pipeline.generate(
@@ -308,38 +355,147 @@ class MatrixGame3Synthesis(BaseSynthesis):
         mouse_condition = result.get("mouse_condition")
         frame_res = result.get("frame_res", (704, 1280))
 
-        video_path = str(out_dir / f"{save_name}.mp4")
-        if save_video:
-            video_np = np.ascontiguousarray(
-                ((rearrange(video_tensor, "C T H W -> T H W C").float() + 1) * 127.5)
-                .clip(0, 255)
-                .detach()
-                .cpu()
-                .numpy()
-                .astype(np.uint8)
-            )
-            mouse_icon = Path(self.code_dir) / "assets" / "images" / "mouse.png"
-            if keyboard_condition is not None and mouse_condition is not None and mouse_icon.exists():
-                process_video(
-                    video_np,
-                    video_path,
-                    (
-                        keyboard_condition.float().cpu().numpy(),
-                        mouse_condition.float().cpu().numpy(),
-                    ),
-                    str(mouse_icon),
-                    mouse_scale=0.2,
-                    default_frame_res=tuple(frame_res),
-                )
-            else:
-                # Fallback without control overlay when icon or conditions are unavailable.
-                export_to_video([frame / 255.0 for frame in video_np], video_path, fps=17)
+        video_path = self._save_video(
+            video_tensor, keyboard_condition, mouse_condition,
+            frame_res, out_dir, save_name, save_video)
 
         payload = {
             "video_tensor": video_tensor,
             "video_path": video_path if save_video else None,
             "keyboard_condition": keyboard_condition,
             "mouse_condition": mouse_condition,
+        }
+        if return_result:
+            return payload
+        return payload["video_path"]
+
+    def predict_clip(
+        self,
+        image: Image.Image,
+        prompt: str,
+        interactions: Optional[List[str]] = None,
+        operator_condition: Optional[Dict[str, Any]] = None,
+        clip_state: Optional[Dict[str, Any]] = None,
+        output_dir: Optional[str] = None,
+        save_name: str = "matrix_game_3_clip",
+        size: str = "704*1280",
+        num_inference_steps: int = 3,
+        seed: int = 42,
+        sample_shift: Optional[float] = None,
+        sample_guide_scale: Optional[float] = None,
+        fa_version: str = "0",
+        use_base_model: bool = False,
+        save_video: bool = True,
+        return_result: bool = False,
+        visualize_warning: bool = False,
+        **kwargs,
+    ) -> Any:
+        out_dir, args, max_area = self._setup_args(
+            output_dir, save_name, size,
+            num_iterations=1,
+            num_inference_steps=num_inference_steps,
+            seed=seed, fa_version=fa_version,
+            use_async_vae=False, async_vae_warmup_iters=0,
+            compile_vae=False, lightvae_pruning_rate=None,
+            vae_type="mg_lightvae_v2", use_int8=False,
+            verify_quant=False, visualize_warning=visualize_warning)
+
+        is_first_clip = clip_state is None
+        restore_get_data = None
+        keyboard_condition_curr = None
+        mouse_condition_curr = None
+        extrinsics_curr = None
+
+        if operator_condition is not None:
+            keyboard = operator_condition.get("keyboard_condition")
+            mouse = operator_condition.get("mouse_condition")
+            if keyboard is not None and mouse is not None:
+                if not isinstance(keyboard, torch.Tensor):
+                    keyboard = torch.tensor(keyboard, dtype=torch.float32)
+                if not isinstance(mouse, torch.Tensor):
+                    mouse = torch.tensor(mouse, dtype=torch.float32)
+                keyboard = keyboard.to(dtype=torch.float32)
+                mouse = mouse.to(dtype=torch.float32)
+
+                if is_first_clip:
+                    restore_get_data = self._patch_get_data(keyboard, mouse)
+                else:
+                    action_frames = 40
+                    if keyboard.shape[0] >= action_frames:
+                        kb_curr = keyboard[:action_frames]
+                        ms_curr = mouse[:action_frames]
+                    else:
+                        pad = action_frames - keyboard.shape[0]
+                        kb_curr = torch.cat(
+                            [keyboard, keyboard[-1:].repeat(pad, 1)], dim=0)
+                        ms_curr = torch.cat(
+                            [mouse, mouse[-1:].repeat(pad, 1)], dim=0)
+
+                    mg3_utils = getattr(self.pipeline, "_mg3_utils_module", None)
+                    last_pose = clip_state.get("last_pose")
+                    first_pose = (
+                        last_pose if last_pose is not None
+                        else np.concatenate([np.zeros(3), np.zeros(2)], axis=0))
+
+                    if mg3_utils is not None:
+                        all_poses, new_last_pose = (
+                            mg3_utils.compute_all_poses_from_actions(
+                                kb_curr, ms_curr,
+                                first_pose=first_pose, return_last_pose=True))
+                        positions = all_poses[:, :3].tolist()
+                        rotations = np.concatenate(
+                            [np.zeros((all_poses.shape[0], 1)),
+                             all_poses[:, 3:5]], axis=1).tolist()
+                        extrinsics_curr = mg3_utils.get_extrinsics(
+                            rotations, positions)
+                        if not isinstance(extrinsics_curr, torch.Tensor):
+                            extrinsics_curr = torch.from_numpy(
+                                np.array(extrinsics_curr)).float()
+                        clip_state["last_pose"] = new_last_pose
+
+                    keyboard_condition_curr = kb_curr.unsqueeze(0)
+                    mouse_condition_curr = ms_curr.unsqueeze(0)
+
+        try:
+            result, new_clip_state = self.pipeline.generate_clip(
+                prompt,
+                pil_image=image if is_first_clip else None,
+                max_area=max_area,
+                shift=float(sample_shift) if sample_shift is not None else 5.0,
+                num_inference_steps=int(num_inference_steps),
+                guide_scale=float(sample_guide_scale) if sample_guide_scale is not None else 5.0,
+                seed=int(seed),
+                use_base_model=bool(use_base_model),
+                args=args,
+                clip_state=clip_state,
+                keyboard_condition_curr=keyboard_condition_curr,
+                mouse_condition_curr=mouse_condition_curr,
+                extrinsics_curr=extrinsics_curr,
+            )
+        finally:
+            if is_first_clip and restore_get_data is not None:
+                restore_get_data()
+
+        video_tensor = result.get("video")
+        if video_tensor is None:
+            raise RuntimeError(
+                "Matrix-Game-3 generate_clip did not return `video` tensor.")
+
+        keyboard_condition = result.get("keyboard_condition")
+        mouse_condition = result.get("mouse_condition")
+        frame_res = result.get("frame_res", (704, 1280))
+
+        video_path = self._save_video(
+            video_tensor, keyboard_condition, mouse_condition,
+            frame_res, out_dir, save_name, save_video)
+
+        payload = {
+            "video_tensor": video_tensor,
+            "video_path": video_path if save_video else None,
+            "keyboard_condition": keyboard_condition,
+            "mouse_condition": mouse_condition,
+            "frame_res": frame_res,
+            "clip_state": new_clip_state,
         }
         if return_result:
             return payload

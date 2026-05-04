@@ -595,3 +595,379 @@ class MatrixGame3Pipeline:
                 "mouse_condition": mouse_condition_all.squeeze(0).detach().cpu() if mouse_condition_all is not None else None,
                 "frame_res": (height, width),
             }
+
+    def generate_clip(
+        self,
+        text,
+        pil_image=None,
+        max_area=704 * 1280,
+        shift=5.0,
+        num_inference_steps=40,
+        guide_scale=5.0,
+        seed=-1,
+        use_base_model=False,
+        args=None,
+        clip_state=None,
+        keyboard_condition_curr=None,
+        mouse_condition_curr=None,
+        extrinsics_curr=None,
+    ):
+        vae_cache = [None for _ in range(32)]
+        weight_dtype = torch.bfloat16
+        height = int(args.size.split("*")[0])
+        width = int(args.size.split("*")[1])
+
+        clip_frame = 56
+        first_clip_frame = clip_frame + 1
+        past_frame = 16
+
+        is_first_clip = clip_state is None
+
+        if is_first_clip:
+            generator = torch.Generator(device=self.device).manual_seed(seed)
+            num_frames = first_clip_frame
+
+            current_image, extrinsics_all, keyboard_condition_all, mouse_condition_all = get_data(
+                num_frames, height, width, pil_image,
+                device=self.device, dtype=weight_dtype)
+
+            cond = self.text_encoder([text], device=self.device)
+            neg_cond = self.text_encoder(
+                [self.config.sample_neg_prompt], device=self.device)
+
+            h_orig = current_image.shape[-2]
+            w_orig = current_image.shape[-1]
+            aspect_ratio = h_orig / w_orig
+            lat_h = round(
+                np.sqrt(max_area * aspect_ratio)
+                // self.vae_stride[1] // self.patch_size[1]
+                * self.patch_size[1])
+            lat_w = round(
+                np.sqrt(max_area / aspect_ratio)
+                // self.vae_stride[2] // self.patch_size[2]
+                * self.patch_size[2])
+            target_h = lat_h * self.vae_stride[1]
+            target_w = lat_w * self.vae_stride[2]
+
+            base_K = get_intrinsics(target_h, target_w)
+
+            if self.rank == 0:
+                img_cond = self.vae.encode(
+                    [current_image[0]])[0].unsqueeze(0).to(
+                    device=self.device, dtype=weight_dtype).contiguous()
+            else:
+                img_cond = torch.zeros(
+                    (1, 48, 1, lat_h, lat_w),
+                    device=self.device, dtype=weight_dtype).contiguous()
+            if dist.is_initialized():
+                dist.broadcast(img_cond, src=0)
+
+            max_lat_f = (first_clip_frame - 1) // self.vae_stride[0] + 1
+            max_mem_f = 5
+            max_total_f = max_lat_f + max_mem_f
+            max_seq_len = (max_total_f * lat_h * lat_w
+                           // (self.patch_size[1] * self.patch_size[2]))
+            if self.sp_size > 1:
+                max_seq_len = int(
+                    math.ceil(max_seq_len / self.sp_size)) * self.sp_size
+
+            all_latents_list = []
+            all_videos_list = []
+            clip_idx = 0
+        else:
+            generator = clip_state["generator"]
+            cond = clip_state["cond"]
+            neg_cond = clip_state["neg_cond"]
+            lat_h = clip_state["lat_h"]
+            lat_w = clip_state["lat_w"]
+            target_h = clip_state["target_h"]
+            target_w = clip_state["target_w"]
+            base_K = clip_state["base_K"]
+            max_seq_len = clip_state["max_seq_len"]
+            h_orig = clip_state["h_orig"]
+            w_orig = clip_state["w_orig"]
+            img_cond = clip_state["img_cond"]
+            all_latents_list = clip_state["all_latents_list"]
+            all_videos_list = clip_state.get("all_videos_list", [])
+            extrinsics_all = clip_state["extrinsics_all"]
+            keyboard_condition_all = clip_state["keyboard_condition_all"]
+            mouse_condition_all = clip_state["mouse_condition_all"]
+            vae_cache = clip_state["vae_cache"]
+            clip_idx = clip_state["clip_idx"]
+
+            if keyboard_condition_curr is not None:
+                keyboard_condition_all = torch.cat(
+                    [keyboard_condition_all, keyboard_condition_curr], dim=1)
+            if mouse_condition_curr is not None:
+                mouse_condition_all = torch.cat(
+                    [mouse_condition_all, mouse_condition_curr], dim=1)
+            if extrinsics_curr is not None:
+                extrinsics_all = torch.cat(
+                    [extrinsics_all, extrinsics_curr], dim=0)
+
+        with torch.no_grad():
+            first_clip = is_first_clip
+
+            if self.rank == 0 and getattr(args, "visualize_warning", False):
+                print(f" Clip iteration {clip_idx + 1}", flush=True)
+
+            def align_frame_to_block(frame_idx):
+                return (frame_idx - 1) // 4 * 4 + 1 if frame_idx > 0 else 1
+
+            def get_latent_idx(frame_idx):
+                return (frame_idx - 1) // 4 + 1
+
+            current_end_frame_idx = (
+                first_clip_frame
+                if first_clip
+                else first_clip_frame + clip_idx * (clip_frame - past_frame)
+            )
+            current_start_frame_idx = (
+                0 if first_clip
+                else current_end_frame_idx - clip_frame
+            )
+
+            c2ws_chunk = extrinsics_all[
+                current_start_frame_idx:current_end_frame_idx]
+            src_indices = np.linspace(
+                current_start_frame_idx, current_end_frame_idx - 1,
+                first_clip_frame if first_clip else clip_frame)
+            tgt_len = (
+                (first_clip_frame - 1) // 4 + 1
+                if first_clip else clip_frame // 4)
+            tgt_indices = np.linspace(
+                0 if first_clip else current_start_frame_idx + 3,
+                current_end_frame_idx - 1, tgt_len)
+            c2ws_chunk_gpu = c2ws_chunk.to(device=self.device)
+
+            plucker = build_plucker_from_c2ws(
+                c2ws_chunk_gpu, src_indices, tgt_indices,
+                framewise=True, base_K=base_K,
+                target_h=target_h, target_w=target_w,
+                lat_h=lat_h, lat_w=lat_w)
+            plucker_no_mem = plucker
+
+            if first_clip:
+                x_memory = None
+                memory_mouse_condition = None
+                memory_keyboard_condition = None
+                latent_idx = None
+                timestep_memory = None
+            else:
+                if self.rank == 0:
+                    selected_index_base = [
+                        current_end_frame_idx - o
+                        for o in range(1, 34, 8)]
+                    selected_index = select_memory_idx_fov(
+                        extrinsics_all, current_start_frame_idx,
+                        selected_index_base, use_gpu=True)
+                    selected_index[-1] = 4
+                else:
+                    selected_index = [0] * 5
+                    selected_index_base = [
+                        current_end_frame_idx - o
+                        for o in range(1, 34, 8)]
+
+                if dist.is_initialized():
+                    dist.broadcast_object_list(selected_index, src=0)
+
+                memory_pluckers = []
+                latent_idx = []
+                for mem_idx, reference_idx in zip(
+                        selected_index, selected_index_base):
+                    l_idx = get_latent_idx(mem_idx)
+                    latent_idx.append(l_idx)
+
+                    mem_idx_aligned = align_frame_to_block(mem_idx)
+                    mem_block = extrinsics_all[
+                        mem_idx_aligned:mem_idx_aligned + 4]
+                    mem_src = np.linspace(
+                        mem_idx_aligned, mem_idx_aligned + 3,
+                        mem_block.shape[0])
+                    mem_tgt = np.array(
+                        [mem_idx_aligned + 3], dtype=np.float32)
+                    mem_pose = _interpolate_camera_poses_handedness(
+                        src_indices=mem_src,
+                        src_rot_mat=mem_block[:, :3, :3].cpu().numpy(),
+                        src_trans_vec=mem_block[:, :3, 3].cpu().numpy(),
+                        tgt_indices=mem_tgt)
+                    reference_pose = extrinsics_all[
+                        reference_idx:reference_idx + 1]
+                    rel_pair = torch.cat(
+                        [reference_pose, mem_pose], dim=0)
+                    rel_pose = compute_relative_poses(
+                        rel_pair, framewise=False)[1:2]
+                    rel_pose_gpu = rel_pose.to(device=self.device)
+
+                    memory_pluckers.append(
+                        build_plucker_from_pose(
+                            rel_pose_gpu, base_K=base_K,
+                            target_h=target_h, target_w=target_w,
+                            lat_h=lat_h, lat_w=lat_w))
+
+                plucker = torch.cat(memory_pluckers + [plucker], dim=2)
+                src = torch.cat(all_latents_list, dim=2)
+                x_memory = src[:, :, latent_idx]
+                memory_mouse_condition = torch.ones(
+                    (1, len(selected_index), 2)).to(
+                    device=self.device, dtype=weight_dtype)
+                memory_keyboard_condition = -torch.ones(
+                    (1, len(selected_index), 6)).to(
+                    device=self.device, dtype=weight_dtype)
+                timestep_memory = x_memory.new_zeros(
+                    (1, x_memory.shape[2]
+                     * x_memory.shape[3] * x_memory.shape[4] // 4))
+
+            keyboard_condition = keyboard_condition_all[
+                :, current_start_frame_idx:current_end_frame_idx]
+            mouse_condition = mouse_condition_all[
+                :, current_start_frame_idx:current_end_frame_idx]
+            plucker = plucker.to(device=self.device, dtype=weight_dtype)
+            plucker_no_mem = plucker_no_mem.to(
+                device=self.device, dtype=weight_dtype)
+
+            test_scheduler = FlowUniPCMultistepScheduler()
+            timesteps = test_scheduler.set_timesteps(
+                num_inference_steps, device=self.device, shift=shift)
+            timesteps = test_scheduler.timesteps
+
+            latent_start_idx = get_latent_idx(current_start_frame_idx)
+            latent_end_idx = get_latent_idx(current_end_frame_idx)
+
+            latents = torch.randn(
+                (1, 48,
+                 latent_end_idx - latent_start_idx,
+                 img_cond.shape[-2], img_cond.shape[-1]),
+                generator=generator, device=self.device,
+                dtype=weight_dtype)
+            latents = torch.cat(
+                [img_cond, latents[:, :, img_cond.shape[2]:]], dim=2)
+
+            conditions_full = {
+                "mouse_cond": mouse_condition,
+                "keyboard_cond": keyboard_condition,
+                "context": cond,
+                "plucker_emb": plucker,
+                "x_memory": x_memory,
+                "timestep_memory": timestep_memory,
+                "keyboard_cond_memory": memory_keyboard_condition,
+                "mouse_cond_memory": memory_mouse_condition,
+                "memory_latent_idx": latent_idx,
+                "predict_latent_idx": (latent_start_idx, latent_end_idx),
+                "fa_version": self.fa_version,
+            }
+
+            conditions_null = {
+                "mouse_cond": torch.ones_like(mouse_condition).to(
+                    device=self.device, dtype=weight_dtype),
+                "keyboard_cond": -torch.ones_like(keyboard_condition).to(
+                    device=self.device, dtype=weight_dtype),
+                "context": neg_cond,
+                "plucker_emb": plucker_no_mem,
+                "x_memory": None,
+                "timestep_memory": None,
+                "keyboard_cond_memory": None,
+                "mouse_cond_memory": None,
+                "memory_latent_idx": None,
+                "predict_latent_idx": (latent_start_idx, latent_end_idx),
+            }
+
+            for _, t in enumerate(tqdm(
+                    timesteps, disable=(self.rank != 0))):
+                latent_model_input = latents
+
+                timestep = latents.new_full(
+                    (latents.shape[2],
+                     latents.shape[3] * latents.shape[4] // 4), t)
+                timestep[:img_cond.shape[2]].zero_()
+                timestep = timestep.flatten().unsqueeze(0)
+
+                model_kwargs = {
+                    "x": latent_model_input,
+                    "t": timestep,
+                    "seq_len": max_seq_len,
+                    **conditions_full
+                }
+
+                model_kwargs_null = {
+                    "x": latent_model_input,
+                    "t": timestep,
+                    "seq_len": max_seq_len,
+                    **conditions_null
+                }
+
+                if use_base_model:
+                    noise_pred_full = self.model(**model_kwargs)
+                    noise_pred_null = self.model(**model_kwargs_null)
+                    noise_pred = noise_pred_null + guide_scale * (
+                        noise_pred_full - noise_pred_null)
+                else:
+                    noise_pred = self.model(**model_kwargs)
+
+                latents = test_scheduler.step(
+                    noise_pred, t, latents, return_dict=False)[0]
+                latents = torch.cat(
+                    [img_cond, latents[:, :, img_cond.shape[2]:]], dim=2)
+
+            img_cond = latents[:, :, -4:]
+            denoised_pred = latents if first_clip else latents[:, :, -10:]
+
+            if self.rank == 0:
+                vae_profiler = {}
+                do_compile = (
+                    getattr(args, "compile_vae", False) and clip_idx >= 1)
+                vae_segment_size = int(
+                    os.environ.get("WAN_VAE_SEGMENT_SIZE", "4"))
+                video, vae_cache = self.vae.stream_decode(
+                    denoised_pred.to(dtype=self.vae.dtype),
+                    vae_cache,
+                    first_chunk=first_clip,
+                    segment_size=vae_segment_size,
+                    profiler=vae_profiler,
+                    compile_decoder=do_compile)
+                all_videos_list.append(video.cpu())
+
+            all_latents_list.append(denoised_pred)
+
+        if self.rank == 0:
+            if len(all_videos_list) > 0:
+                video = torch.concat(all_videos_list, dim=2)[0]
+            else:
+                video = None
+        else:
+            video = None
+
+        new_clip_state = {
+            "all_latents_list": all_latents_list,
+            "all_videos_list": all_videos_list,
+            "extrinsics_all": extrinsics_all,
+            "keyboard_condition_all": keyboard_condition_all,
+            "mouse_condition_all": mouse_condition_all,
+            "img_cond": img_cond,
+            "vae_cache": vae_cache,
+            "clip_idx": clip_idx + 1,
+            "generator": generator,
+            "cond": cond,
+            "neg_cond": neg_cond,
+            "lat_h": lat_h,
+            "lat_w": lat_w,
+            "target_h": target_h,
+            "target_w": target_w,
+            "base_K": base_K,
+            "max_seq_len": max_seq_len,
+            "h_orig": h_orig,
+            "w_orig": w_orig,
+        }
+
+        result = {
+            "video": video,
+            "video_path": None,
+            "keyboard_condition": (
+                keyboard_condition_all.squeeze(0).detach().cpu()
+                if keyboard_condition_all is not None else None),
+            "mouse_condition": (
+                mouse_condition_all.squeeze(0).detach().cpu()
+                if mouse_condition_all is not None else None),
+            "frame_res": (height, width),
+        }
+        return result, new_clip_state
