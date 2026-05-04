@@ -36,6 +36,7 @@ class MatrixGame3Synthesis(BaseSynthesis):
         self.checkpoint_dir = checkpoint_dir
         self.code_dir = code_dir
         self.device = device
+        self._v2v_memory_image: Optional[Image.Image] = None
 
     @classmethod
     def from_pretrained(
@@ -344,3 +345,93 @@ class MatrixGame3Synthesis(BaseSynthesis):
         if return_result:
             return payload
         return payload["video_path"]
+
+    def reset_video_memory(self) -> None:
+        self._v2v_memory_image = None
+
+    def predict_from_video(
+        self,
+        images: List[Image.Image],
+        prompt: str,
+        interactions: Optional[List[str]] = None,
+        operator_condition: Optional[Dict[str, Any]] = None,
+        output_dir: Optional[str] = None,
+        save_name: str = "matrix_game_3_demo",
+        size: str = "704*1280",
+        num_iterations: int = 12,
+        num_inference_steps: int = 3,
+        seed: int = 42,
+        sample_shift: Optional[float] = None,
+        sample_guide_scale: Optional[float] = None,
+        fa_version: str = "0",
+        use_int8: bool = False,
+        verify_quant: bool = False,
+        use_async_vae: bool = False,
+        async_vae_warmup_iters: int = 0,
+        compile_vae: bool = False,
+        lightvae_pruning_rate: Optional[float] = None,
+        vae_type: str = "mg_lightvae_v2",
+        use_base_model: bool = False,
+        save_video: bool = True,
+        return_result: bool = False,
+        visualize_warning: bool = False,
+        reset_memory: bool = False,
+        **kwargs,
+    ) -> Any:
+        if not isinstance(images, list) or len(images) == 0:
+            raise ValueError("MatrixGame3Synthesis.predict_from_video expects a non-empty list of PIL.Image.")
+        for frame in images:
+            if not isinstance(frame, Image.Image):
+                raise ValueError("All elements in `images` must be PIL.Image.")
+
+        if reset_memory:
+            self.reset_video_memory()
+
+        # Keep a lightweight cross-call memory: if available, continue from the last
+        # frame of previous video; otherwise start from the first frame of current video.
+        condition_image = self._v2v_memory_image if self._v2v_memory_image is not None else images[0]
+
+        result = self.predict(
+            image=condition_image,
+            prompt=prompt,
+            interactions=interactions,
+            operator_condition=operator_condition,
+            output_dir=output_dir,
+            save_name=save_name,
+            size=size,
+            num_iterations=num_iterations,
+            num_inference_steps=num_inference_steps,
+            seed=seed,
+            sample_shift=sample_shift,
+            sample_guide_scale=sample_guide_scale,
+            fa_version=fa_version,
+            use_int8=use_int8,
+            verify_quant=verify_quant,
+            use_async_vae=use_async_vae,
+            async_vae_warmup_iters=async_vae_warmup_iters,
+            compile_vae=compile_vae,
+            lightvae_pruning_rate=lightvae_pruning_rate,
+            vae_type=vae_type,
+            use_base_model=use_base_model,
+            save_video=save_video,
+            return_result=True,
+            visualize_warning=visualize_warning,
+            **kwargs,
+        )
+
+        video_tensor = result.get("video_tensor")
+        if isinstance(video_tensor, torch.Tensor) and video_tensor.ndim == 4 and video_tensor.shape[1] > 0:
+            last_frame = video_tensor[:, -1:, :, :].detach().cpu()
+            frame_np = np.ascontiguousarray(
+                ((rearrange(last_frame, "C T H W -> T H W C").float() + 1) * 127.5)
+                .clip(0, 255)
+                .numpy()
+                .astype(np.uint8)
+            )[0]
+            self._v2v_memory_image = Image.fromarray(frame_np)
+        else:
+            self._v2v_memory_image = images[-1]
+
+        if return_result:
+            return result
+        return result.get("video_path")

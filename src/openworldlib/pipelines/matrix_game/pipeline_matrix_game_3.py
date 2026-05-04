@@ -117,8 +117,8 @@ class MatrixGame3Pipeline:
 
         prompt_text = prompt or "A first-person view interactive scene."
         need_payload = return_result or (video_save_path is not None)
-        prediction: Any = self.synthesis_model.predict(
-            image=processed_inputs["image"],
+        prediction: Any = self.synthesis_model.predict_from_video(
+            images=processed_inputs["image"],
             prompt=prompt_text,
             interactions=interactions,
             operator_condition=processed_inputs,
@@ -195,7 +195,7 @@ class MatrixGame3Pipeline:
     
     def v2v(
         self,
-        images: Image.Image,
+        images: List[Image.Image],
         interactions: Optional[List[str]] = None,
         prompt: Optional[str] = None,
         output_dir: Optional[str] = None,
@@ -221,14 +221,6 @@ class MatrixGame3Pipeline:
         visualize_warning: bool = False,
         **kwargs,
     ) -> str:
-        if self.memory_module is None:
-            raise RuntimeError("MatrixGame3Pipeline.memory_module is not initialized.")
-        if images is not None:
-            self.memory_module.record(images)
-        current_image = self.memory_module.select()
-        if current_image is None:
-            raise ValueError("No image in storage. Provide 'images' first.")
-    
         if not isinstance(images, list):
             raise ValueError("MatrixGame3Pipeline expects `images` to be a PIL.Image.")
         if self.synthesis_model is None:
