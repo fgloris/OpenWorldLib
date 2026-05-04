@@ -156,3 +156,42 @@ class LingBotPipeline:
             self.memory_module.record(video_output, type="video_chunk")
 
         return video_output
+    
+    def v2v(self,
+                prompt: Optional[str] = None,
+                interactions: Optional[list[str]] = None,
+                images: Any = None,
+                num_frames: Optional[int] = 81,
+                resize_H: int = 480,
+                resize_W: int = 832,
+                seed: int = 42,
+                **kwds) -> np.ndarray:
+        
+        # 1. Initialize Memory if images provided (First Turn)
+        if images is not None:
+            print("--- Stream Started ---")
+            self.memory_module.manage(action="reset") # Clear old memory
+            self.memory_module.record(images, type="image")
+        
+        # 2. Retrieve Context (Input for this turn)
+        current_img = self.memory_module.select()
+        if current_img is None:
+            raise ValueError("No image in storage. Provide 'images' first.")
+
+        # 3. Generate Video
+        video_output = self.__call__(
+            images=current_img,
+            num_frames=num_frames,
+            prompt=prompt,
+            interactions=interactions,
+            resize_H=resize_H,
+            resize_W=resize_W,
+            seed=seed,
+            **kwds
+        ) # Returns numpy array [T, H, W, C]
+
+        # 4. Record Result (Updates context for next turn)
+        if video_output is not None:
+            self.memory_module.record(video_output, type="video_chunk")
+
+        return video_output

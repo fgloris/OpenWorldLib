@@ -33,7 +33,7 @@ class InfiniteWorldMemory(BaseMemory):
             self.target_size = target_size
             current_image = _np_to_pil(self.all_frames[-1])
         elif isinstance(data, list):
-            frames = [np.array(frame, dtype=np.uint8) for frame in data]
+            frames = processed_frames or [np.array(frame, dtype=np.uint8) for frame in data]
             if len(frames) == 0:
                 raise ValueError("generated frame list cannot be empty")
             self.all_frames.extend(frames)

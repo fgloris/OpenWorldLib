@@ -239,7 +239,7 @@ class InfiniteWorldPipeline:
 
         # 调用模型：核心在于 cond_video 现在是一个包含多帧的 Tensor
         generated_frames = self.synthesis_model.predict(
-            cond_video=perception_dict["video"][-1:], # 这里的 video 包含了你输入的完整视频特征
+            cond_video=perception_dict["video"], # 这里的 video 包含了你输入的完整视频特征
             move_ids=operator_condition["move_ids"],
             view_ids=operator_condition["view_ids"],
             prompt=prompt,
